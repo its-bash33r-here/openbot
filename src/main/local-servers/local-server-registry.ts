@@ -115,8 +115,16 @@ export class LocalServerRegistry {
     yield* this.#loadPendingRemovals();
     // An earlier build kept the list in the servers file. It moves to the pending file once, here,
     // before any other build can rewrite the servers file. After that the pending file is the only source.
+    // A failed migration makes the registry read-only and drops the inline list, so no stale ID is actionable.
     if (!this.#readOnly && this.#pendingOnDisk === null && this.#removedHostIds.length)
-      yield* this.#persistPendingRemovals(this.#removedHostIds);
+      yield* this.#persistPendingRemovals(this.#removedHostIds).pipe(
+        Effect.tapError(() =>
+          Effect.sync(() => {
+            this.#readOnly = true;
+            this.#removedHostIds = [];
+          }),
+        ),
+      );
   });
 
   readonly #loadServersFile = Effect.fn("LocalServerRegistry.loadServersFile")(function* (this: LocalServerRegistry) {
