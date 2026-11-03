@@ -5,3 +5,4 @@
 ### Fixed
 
 - The registered Appium MCP server is no longer given to an agent whose Computer Use is off. Before, the agent could still reach a simulator or device through Appium, because only Computer Use was removed from its tools.
+- A deleted server on this computer keeps its pending account removal when an older OpenBot build saves the same server list. Before, that build could drop the pending removal, so the account kept listing a server that was already deleted here.
