@@ -60,7 +60,7 @@ const decodeRegistryFile = Schema.decodeUnknownSync(registryFileSchema);
  * The deleted servers that still wait for the account service. It lives in its own file, because an
  * earlier build rewrites the servers file without the field above and would drop a pending removal.
  */
-export const PENDING_REMOVALS_FILE = "openbot-local-servers-pending-removals-v1.json";
+const PENDING_REMOVALS_FILE = "openbot-local-servers-pending-removals-v1.json";
 
 const pendingRemovalsSchema = Schema.Struct({
   version: Schema.Literal(1),

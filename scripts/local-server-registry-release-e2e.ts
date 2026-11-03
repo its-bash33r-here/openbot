@@ -16,8 +16,8 @@ import { Effect, Result } from "effect";
 
 /** The official v0.59.0 release commit. Its package version is checked below. */
 const RELEASE = "ed395dadf500922a358422b3514aa3aa3e6c6400";
-/** The pre-fix commit: the last one whose registry keeps the pending list inline in the servers file. */
-const BASELINE_PRE_FIX = "19e955df0eca30dd55490e0390cc249193945d63";
+/** The upstream commit that introduced the bug: its registry keeps the pending list inline in the servers file. */
+const BASELINE_PRE_FIX = "0de6ae1a6c93a6938d1da50a0cd8a82d538fb9b1";
 const RELEASE_VERSION = "0.59.0";
 const ROOT = resolve(import.meta.dirname, "..");
 const SOURCE = "src/main/local-servers/local-server-registry.ts";
