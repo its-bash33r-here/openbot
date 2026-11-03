@@ -22,6 +22,17 @@ const agent: AgentSummary = {
   avatarHue: null,
   avatarUrl: null,
 };
+// Tool identifiers and capability keys that the iOS recipe must expose only when Appium QA is allowed.
+const IOS_RECIPE_IDENTIFIERS = [
+  "appium_session_management",
+  "select_device",
+  "appium_get_page_source",
+  "prepare_ios_simulator",
+  "appium:usePrebuiltWDA false",
+  "appium:noReset true",
+  "appium:forceAppLaunch false",
+  "appium:shouldTerminateApp false",
+];
 const cases = [];
 for (const computerUse of [true, false]) {
   for (const sideThread of [true, false]) {
@@ -45,6 +56,9 @@ for (const computerUse of [true, false]) {
         assert.ok(text.includes("Tool registration is not permission"));
         assert.ok(text.includes("take over a device without explicit approval"));
         assert.ok(text.includes("do not ask the user to relay prompts"));
+        for (const identifier of IOS_RECIPE_IDENTIFIERS) assert.ok(text.includes(identifier), identifier);
+      } else {
+        for (const identifier of IOS_RECIPE_IDENTIFIERS) assert.ok(!text.includes(identifier), identifier);
       }
       cases.push({ computerUse, sideThread, computerUseInOwnChat, allowed, status: "pass" });
     }
