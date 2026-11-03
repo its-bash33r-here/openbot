@@ -97,22 +97,31 @@ for (const [registration, configs] of Object.entries(registrations)) {
           registration === "registered" && computerUse,
           "The classifier matches the list.",
         );
-        // Without a configured Appium server there is no Appium line at all, as upstream. With one, the rule
-        // is present when permitted, and the denial when a side thread or a Computer Use task denies it.
+        // The denial is for every conversation that is not permitted, configured or not. The rule is for a
+        // permitted conversation with a configured server. A permitted one without a server has no Appium line.
         assert.equal(
           text.includes(UPSTREAM_QA_SENTENCE),
           appiumConfigured && permitted,
-          "The rule needs Appium and permission.",
+          "The rule needs a server and permission.",
         );
         assert.equal(
           text.includes(DENIED_QA_SENTENCE),
-          appiumConfigured && !permitted,
-          "The denial needs Appium and no permission.",
+          !permitted,
+          "The denial is for every conversation not permitted.",
         );
         assert.ok(text.includes("Use openbot_browser tools for browser work"));
         assert.ok(text.includes("Never ask for a secret in chat"));
-        if (computerUse) assert.ok(text.includes("for every GUI task outside the embedded browser"));
-        else assert.ok(text.toLowerCase().includes("do not control desktop applications outside the embedded browser"));
+        if (computerUse) {
+          const route = permitted && appiumConfigured;
+          assert.ok(
+            text.includes(
+              route
+                ? "for desktop GUI tasks outside the embedded browser"
+                : "for every GUI task outside the embedded browser",
+            ),
+          );
+        } else
+          assert.ok(text.toLowerCase().includes("do not control desktop applications outside the embedded browser"));
         if (permitted && appiumConfigured) {
           assert.ok(text.includes("Tool registration is not permission"));
           assert.ok(text.includes("take over a device without explicit approval"));
@@ -121,6 +130,11 @@ for (const [registration, configs] of Object.entries(registrations)) {
         for (const identifier of IOS_RECIPE_IDENTIFIERS) {
           const expected = permitted && appiumConfigured;
           assert.equal(text.includes(identifier), expected, `${identifier} is ${expected ? "present" : "absent"}.`);
+        }
+        if (registration === "unregistered" && permitted) {
+          // Upstream, byte for byte: no Appium line and the "every GUI task" wording.
+          assert.ok(!text.includes("Appium"), "A permitted conversation without Appium has no Appium line.");
+          assert.ok(text.includes("for every GUI task outside the embedded browser"));
         }
         cases.push({
           registration,
@@ -136,6 +150,18 @@ for (const [registration, configs] of Object.entries(registrations)) {
     }
   }
 }
+// The two real cases that the policy turns on, named: Computer Use off after the filter, and an eligible
+// chat with a registered server.
+const offFiltered = cases.find(
+  (c) => c.registration === "registered" && !c.computerUse && !c.sideThread && !c.computerUseInOwnChat,
+);
+const eligibleRegistered = cases.find(
+  (c) => c.registration === "registered" && c.computerUse && !c.sideThread && !c.computerUseInOwnChat,
+);
+assert.equal(offFiltered?.appiumConfigured, false, "Computer Use off: the filter removes the Appium server.");
+assert.equal(offFiltered?.permitted, false, "Computer Use off is not permitted.");
+assert.equal(eligibleRegistered?.appiumConfigured, true, "An eligible chat keeps its registered server.");
+assert.equal(eligibleRegistered?.recipe, true, "An eligible chat with a registered server gets the recipe.");
 await mkdir(".openbot-build", { recursive: true });
 await writeFile(".openbot-build/mobile-qa-routing-smoke.json", JSON.stringify({ status: "pass", cases }, null, 2));
 process.stdout.write(`PASS: ${cases.length} instruction-routing cases; no provider or device started.\n`);
