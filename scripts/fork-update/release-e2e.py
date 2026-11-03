@@ -157,9 +157,17 @@ def main():
             assert e.phase == "held"
         else:
             raise AssertionError("Missing WhatsApp review allowed")
+        u.git(src, "fetch", str(origin), "refs/heads/" + u.BRANCH)
+        u.git(src, "switch", "--detach", "FETCH_HEAD")
+        (src / "unmerged-code").write_text("keep this manual fix")
+        u.git(src, "add", "unmerged-code")
+        u.git(src, "commit", "-m", "Manual fork release fix", "-m", "Fork-Source: " + second["source"])
+        u.git(src, "push", str(origin), "HEAD:refs/heads/" + u.BRANCH)
+        expect("failed")
+        assert u.git(origin, "show", u.BRANCH + ":unmerged-code") == "keep this manual fix"
         out.parent.mkdir(parents=True,exist_ok=True)
         u.save(out,{"realGit":True,"services":"local fixtures","cases":["upstream hold","CI failure","partial upload",
-               "resume same commit","install after published checksums","up to date","second release preserves both fork changes","merge conflict","missing WhatsApp evidence"]})
+               "resume same commit","install after published checksums","up to date","second release preserves both fork changes","merge conflict","missing WhatsApp evidence","manual release branch change preserved"]})
     print(out)
 
 

@@ -192,6 +192,15 @@ def candidate(config, guard_only=False):
         git(cache, "fetch", "--no-tags", repo_url(FORK), tip)
         base = checked(git(cache, "show", "-s", "--format=%(trailers:key=Fork-Source,valueonly)", tip), SHA, "fork release source")
         require(git(cache, "merge-base", "--is-ancestor", base, tip, check=False) == 0, "Invalid release history")
+        # Only generated release metadata may be omitted when carrying forward the clean source.
+        require(git(cache, "diff", "--quiet", base, tip, "--", ".", ":(exclude)CHANGELOG.md",
+                    ":(exclude)changelog.d/**", ":(exclude)package.json", check=False) == 0,
+                "The release branch contains additional code. Merge those changes into fork main first")
+        manifest = json.loads(git(cache, "show", tip + ":package.json"))
+        previous_manifest = json.loads(git(cache, "show", base + ":package.json"))
+        manifest.pop("version")
+        previous_manifest.pop("version")
+        require(manifest == previous_manifest, "The release branch contains unpublished package changes")
     else:
         base = seed
     batch = Path(tempfile.mkdtemp(dir=ROOT, prefix="candidate-"))
