@@ -3261,7 +3261,7 @@ export async function createApplicationServices({
       const realAdapter = updaterModule.autoUpdater ?? updaterModule.default?.autoUpdater ?? updaterModule.default;
       if (realAdapter) {
         updateAdapter = realAdapter;
-        updaterCacheDirectory = join(electronUpdaterCacheRoot(), "openbot-updater");
+        updaterCacheDirectory = join(electronUpdaterCacheRoot(), "openbot-fork-updater");
       } else {
         updaterEnabled = false;
         logger.warn("OpenBot updates are disabled: electron-updater did not export autoUpdater");
