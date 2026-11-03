@@ -99,7 +99,7 @@ def main():
         cfg = {"source": str(src), "seed": seed}
         u.repo_url = lambda name: str(origin if name == u.FORK else upstream)
         u.public_manifest = lambda digest: None  # No public network in this fixture.
-        u.installed = lambda: "1.0.1" if (u.ROOT / "completed.json").exists() else "1.0.0"
+        u.installed = lambda: u.read(u.ROOT / "completed.json", {"version": "1.0.0"})["version"]
         guard = u.release_guard
         def held(*_):
             raise u.Stop("held","Fixture upstream hold")
@@ -126,12 +126,27 @@ def main():
         assert (u.ROOT/"installs").read_text().splitlines()==["prepare","prepare","install"]
         u.update(cfg)
         assert u.read(u.ROOT/"status.json")["phase"]=="upToDate"
-        # An upstream/fork conflict cannot change the public branch or install a second build.
-        u.git(src,"switch","--detach","v1.0.0")
+        # Advance fork main and verify that release history fast-forwards on a second signed version.
+        u.git(src, "switch", "--detach", "v1.0.0")
+        (src / "next").write_text("another fork change")
+        u.git(src, "add", "next")
+        u.git(src, "commit", "-m", "next change")
+        u.git(src, "push", str(origin), "HEAD:main")
+        # The service fixture now serves the new tag and commit's CI and release records.
+        service = u.read(folder / "github.json")
+        service.update(assets={}, release=False, draft=True)
+        u.save(folder / "github.json", service)
+        u.update(cfg)
+        second = u.read(u.ROOT / "completed.json")
+        assert second["version"] == "1.0.2" and second["previous"] == tx["commit"]
+        assert u.git(origin, "merge-base", "--is-ancestor", tx["commit"], second["commit"], check=False) == 0
+        assert u.git(origin, "show", second["commit"] + ":file") == "fork"
+        assert u.git(origin, "show", second["commit"] + ":next") == "another fork change"
+        # An upstream/fork conflict cannot change the public branch or install a third build.
         (src / "file").write_text("conflicting main")
         u.git(src,"commit","-am","incompatible change"); u.git(src,"push",str(origin),"HEAD:main")
         expect("conflict")
-        assert tx["commit"]==u.remote_ref(u.FORK,"refs/heads/"+u.BRANCH)
+        assert second["commit"]==u.remote_ref(u.FORK,"refs/heads/"+u.BRANCH)
         # Exercise the real WhatsApp evidence gate on a tagged fixture with no review.
         (src/"packages/whatsapp/src/signal").mkdir(parents=True)
         (src/"packages/whatsapp/src/signal/crypto").write_text("fixture")
@@ -144,7 +159,7 @@ def main():
             raise AssertionError("Missing WhatsApp review allowed")
         out.parent.mkdir(parents=True,exist_ok=True)
         u.save(out,{"realGit":True,"services":"local fixtures","cases":["upstream hold","CI failure","partial upload",
-               "resume same commit","install after published checksums","up to date","merge conflict","missing WhatsApp evidence"]})
+               "resume same commit","install after published checksums","up to date","second release preserves both fork changes","merge conflict","missing WhatsApp evidence"]})
     print(out)
 
 
