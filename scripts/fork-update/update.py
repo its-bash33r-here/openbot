@@ -101,53 +101,6 @@ def remote_ref(repo, ref):
     return checked(sha, SHA, "remote revision")
 
 
-def reviewed_whatsapp(work, source, upstream, tag):
-    trees = ("packages/whatsapp/src", "packages/whatsapp/vendor")
-    path = upstream + ":packages/whatsapp/release-evidence.json"
-    if git(work, "cat-file", "-e", path, check=False) == 0:
-        review = json.loads(git(work, "show", path))
-        ref = checked(review.get("reviewedCommit"), SHA, "WhatsApp review revision")
-        proofs = (review.get("legalReview"), review.get("realPhoneTest"))
-        if not all(isinstance(v, str) and re.fullmatch(
-                r"https://github\.com/nightly-labs/openbot/(?:pull|issues|actions/runs)/[0-9]+(?:#[\w-]+)?", v) for v in proofs):
-            return False
-        if git(work, "merge-base", "--is-ancestor", ref, upstream, check=False):
-            return False
-    else:
-        # Also accept explicit results in the upstream publisher's release notes. Merely tagging
-        # a revision, or repeating a checklist of work to do, does not attest that it passed.
-        ref = upstream
-        if not tag or git(work, "diff", "--quiet", upstream, source, "--", *trees, check=False):
-            return False
-        release = api("repos/" + UPSTREAM + "/releases/tags/" + checked(tag, "v" + VERSION, "stable tag"))
-        if release["tag_name"] != tag or release["draft"] or release["prerelease"]:
-            return False
-        lines = {line.lower().strip().lstrip("-* ").rstrip(".") for line in (release.get("body") or "").splitlines()}
-        def passed(subject):
-            return any(f"{subject}: {result}" in lines for result in ("passed", "approved", "completed successfully"))
-        if not passed("whatsapp legal review") or not any(passed(s) for s in (
-                "whatsapp real-phone interoperability test", "whatsapp two-phone test")):
-            return False
-    return git(work, "diff", "--quiet", ref, source, "--", *trees, check=False) == 0
-
-
-def release_guard(work, source, upstream, tag=None):
-    if git(work, "ls-tree", source, "packages/whatsapp/src/signal") and not reviewed_whatsapp(work, source, upstream, tag):
-        raise Stop("held", "Upstream WhatsApp legal review and real-phone test evidence is missing for this code.")
-    try:
-        with urllib.request.urlopen("https://signal.openbot.run/health/live", timeout=15) as r:
-            live = json.loads(r.read(4096))
-        sha = checked(live.get("commit"), SHA, "Signal revision")
-        if live.get("service") != "openbot-remote-api" or live.get("status") != "live":
-            raise ValueError()
-        if git(work, "cat-file", "-e", sha + "^{commit}", check=False):
-            git(work, "fetch", "--no-tags", repo_url(UPSTREAM), sha)
-        if git(work, "diff", "--quiet", sha, source, "--", "remote", "packages/contracts/src/signal-protocol", check=False):
-            raise ValueError()
-    except (ValueError, OSError, Stop) as error:
-        raise Stop("held", "The live Signal service does not match this source.") from error
-
-
 def semver(value):
     return tuple(map(int, checked(value, VERSION, "stable version").split(".")))
 
@@ -158,34 +111,31 @@ def installed():
     return info["CFBundleShortVersionString"]
 
 
-def latest_stable():
-    release = api("repos/" + UPSTREAM + "/releases/latest")
-    require(not release["draft"] and not release["prerelease"], "Missing stable upstream release")
-    return checked(release["tag_name"], "v" + VERSION, "upstream release tag")
-
-
-def merge(work, ref):
+def merge(work, ref, label):
     if git(work, "merge-base", "--is-ancestor", ref, "HEAD", check=False) == 0:
         return
     if git(work, "merge", "--no-edit", ref, check=False):
-        raise Stop("conflict", "Resolve the upstream merge in your fork before retrying.")
+        paths = git(work, "diff", "--name-only", "--diff-filter=U").splitlines()
+        if paths:
+            raise Stop("conflict", label + " conflicts in " + ", ".join(paths[:8]) + ". Resolve the merge, then retry.")
+        raise Stop("failed", "Git could not merge " + label + ".")
 
 
-def candidate(config, guard_only=False):
+def candidate(config, probe=False):
     cache = ROOT / "cache.git"
     if not cache.exists():
         command("git", "init", "--bare", cache)
     for key, value in (("user.name", "Syed Basheer Ahamed"), ("user.email", "45915098+its-bash33r-here@users.noreply.github.com"),
                        ("core.hooksPath", ".githooks")):
         git(cache, "config", key, value)
-    tag = latest_stable()
     seed = checked(config["seed"], SHA, "configured source")
     if git(cache, "cat-file", "-e", seed + "^{commit}", check=False):
         git(cache, "fetch", "--no-tags", config["source"], seed + ":refs/pinned/" + seed)
     for url, ref, dest in ((repo_url(FORK), "refs/heads/main", "fork"),
-                           (repo_url(UPSTREAM), "refs/tags/" + tag, "upstream")):
+                           (repo_url(UPSTREAM), "refs/heads/main", "upstream")):
         git(cache, "fetch", "--no-tags", url, "+" + ref + ":refs/input/" + dest)
     up = git(cache, "rev-parse", "refs/input/upstream^{commit}")
+    fork = git(cache, "rev-parse", "refs/input/fork^{commit}")
     tip = remote_ref(FORK, "refs/heads/" + BRANCH)
     last = read(ROOT / "completed.json")
     if tip:
@@ -205,18 +155,25 @@ def candidate(config, guard_only=False):
         base = seed
     batch = Path(tempfile.mkdtemp(dir=ROOT, prefix="candidate-"))
     work = batch / "source"
-    git(cache, "worktree", "add", "--detach", work, base)
+    git(cache, "worktree", "add", "--detach", work, fork)
     keep = False
     try:
-        for ref in (seed, "refs/input/fork", up):
-            merge(work, ref)
+        # Reproduce GitHub's Update branch on the fork. Release-only changes stay on the Mac branch.
+        merge(work, up, "upstream main and fork main")
+        synced = git(work, "rev-parse", "HEAD")
+        git(work, "switch", "--detach", base)
+        merge(work, seed, "the saved Mac changes")
+        merge(work, synced, "the Mac changes and synced fork")
         source = git(work, "rev-parse", "HEAD")
-        if not guard_only and tip and last and tip == last["commit"] and base == source and installed() == last["version"]:
-            state("upToDate")
+        if probe:
+            state("idle", "Fork main and upstream main " + up[:12] + " merge with this Mac's changes.")
             return None
-        release_guard(work, source, up, tag)
-        if guard_only:
-            state("idle", "Release prerequisites passed.")
+        if synced != fork:
+            # A concurrent push to main must survive. A normal push refuses a non-fast-forward.
+            if git(work, "push", repo_url(FORK), synced + ":refs/heads/main", check=False):
+                raise Stop("failed", "Could not sync fork main. Check Git push access or retry with the new branch tip.")
+        if tip and last and tip == last["commit"] and base == source and installed() == last["version"]:
+            state("upToDate")
             return None
         if tip and base == source:
             raise Stop("held", "An existing fork release needs recovery on this Mac.")
@@ -243,14 +200,14 @@ def candidate(config, guard_only=False):
         baseline = max(versions, key=semver)
         package.write_text(re.sub(r'("version"\s*:\s*")[^"]+', lambda m: m[1] + baseline, package.read_text(), count=1))
         fragment = work / "changelog.d/fork-macos-sync.md"
-        fragment.write_text("### Changed\n\n- Update the Mac app with the changes from OpenBot " + tag + ".\n")
+        fragment.write_text("### Changed\n\n- Update the Mac app with the changes from upstream main at " + up[:12] + ".\n")
         command("bun", "scripts/prepare-release.ts", "patch", cwd=work)
         version = checked(json.loads(package.read_text())["version"], VERSION, "new version")
         git(work, "add", "--", "package.json", "CHANGELOG.md", "changelog.d")
         git(work, "commit", "-m", "Release OpenBot for Mac " + version, "-m", "Fork-Source: " + source)
-        tx = {"commit": git(work, "rev-parse", "HEAD"), "source": source, "upstream": up, "tag": tag,
+        tx = {"commit": git(work, "rev-parse", "HEAD"), "source": source, "upstream": up,
               "version": version, "batch": batch.name, "previous": tip, "seed": seed,
-              "forkMain": git(work, "rev-parse", "refs/input/fork")}
+              "forkMain": synced}
         save(ROOT / "pending.json", tx)
         keep = True
         return tx
@@ -350,7 +307,7 @@ def publish(tx, work, directory, digests):
         return json.loads(gh("release", "view", version, "-R", FORK, "--json", "isDraft,isPrerelease,assets"))
     if command("gh", "release", "view", version, "-R", FORK, check=False):
         notes = directory.parent / "notes.md"
-        notes.write_text("OpenBot " + version + " for Apple silicon.\n\nUpstream stable source: " + tx["tag"] + ".\n")
+        notes.write_text("OpenBot " + version + " for Apple silicon.\n\nUpstream source commit: " + tx["upstream"] + ".\n")
         gh("release", "create", version, "-R", FORK, "--draft", "--verify-tag", "--title", "OpenBot " + version, "--notes-file", notes)
     record = info()
     require(not record["isPrerelease"], "Unexpected release channel")
@@ -371,8 +328,8 @@ def publish(tx, work, directory, digests):
 def update(config, *, probe=False):
     state("syncing")
     tx = None if probe else read(ROOT / "pending.json")
-    if tx and tx.get("failedRun") and not tx.get("digests"):
-        changed = (config["seed"] != tx["seed"] or latest_stable() != tx["tag"] or
+    if tx and not tx.get("digests"):
+        changed = (config["seed"] != tx["seed"] or remote_ref(UPSTREAM, "refs/heads/main") != tx["upstream"] or
                    remote_ref(FORK, "refs/heads/main") != tx["forkMain"])
         if changed and remote_ref(FORK, "refs/tags/" + tx["version"]) is None:
             os.replace(ROOT / "pending.json", ROOT / tx["batch"] / "superseded.json")
@@ -385,7 +342,6 @@ def update(config, *, probe=False):
     work, output = batch / "source", batch / "release"
     require(git(work, "rev-parse", "HEAD") == tx["commit"] and not git(work, "status", "--porcelain"),
             "The prepared release checkout changed")
-    release_guard(work, tx["source"], tx["upstream"], tx["tag"])
     state("checking")
     hosted_checks(tx, work)
     state("signing")
@@ -401,7 +357,6 @@ def update(config, *, probe=False):
     try:
         command(sys.executable, installer, "--prepare", app, local=True, timeout=90000)
         state("publishing")
-        release_guard(work, tx["source"], tx["upstream"], tx["tag"])
         publish(tx, work, output, digests)
         state("installing")
         command(sys.executable, installer, app, local=True, timeout=3600)

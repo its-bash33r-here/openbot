@@ -1,12 +1,12 @@
 # One-click Mac updates
 
 The owner of this Apple silicon Mac can use **Settings → Updates → Update this Mac** on the local server.
-A click fetches the latest published stable release from `nightly-labs/openbot` and the latest
-`its-bash33r-here/openbot` main. It merges both with the saved fork changes in a private checkout.
-The first fork update includes the previously integrated upstream changes. The button runs on demand.
+A click fetches `main` from both `nightly-labs/openbot` and `its-bash33r-here/openbot`.
+It merges upstream into the fork in a private checkout and checks that the result merges with
+the saved Mac changes. A clean merge advances the fork's `main` with a normal push.
+The release includes the upstream commits, the fork commits and the local Mac changes.
 
-1. **Check.** The runner stops on a merge conflict or an unmet release requirement. For an eligible
-   candidate it pushes an immutable candidate branch and requests hosted CI on that exact commit.
+1. **Check.** The runner pushes a candidate branch and requests hosted CI on that exact commit.
 2. **Build.** On success the Mac builds, signs, notarizes, and verifies the app, update ZIP, DMG and
    manifest. Signing uses the team's Developer ID in the login Keychain and the signed-in Xcode account.
 3. **Install.** OpenBot waits for work to finish and quits. The runner backs up the old app, profile and
@@ -30,26 +30,25 @@ The first installation of the button uses a local signed bootstrap package. The 
 must finish its work and quit once. Later releases use the idle handoff. A secondary local server
 must stop before the app can be exchanged.
 
-Use `"$HOME/Library/Application Support/OpenBot Fork Updates/update" --probe` to check release
-prerequisites without pushing, building or installing. The probe can write a local Git cache and
+Use `"$HOME/Library/Application Support/OpenBot Fork Updates/update" --probe` to test both merges
+without pushing, building or installing. The probe can write a local Git cache and
 status. Use `--status` for a read-only phase query.
 
-## Upstream release prerequisites
+## Conflicts and retries
 
-The public Signal health endpoint must identify a commit with the same `remote` and Signal protocol
-files as the candidate. If the candidate includes the WhatsApp crypto code, the reader can use the upstream stable release notes or
-`packages/whatsapp/release-evidence.json` in a **published stable upstream tag**. It must name
-a full `reviewedCommit` covered by that tag and include `legalReview` and `realPhoneTest` URLs for
-the upstream GitHub project. The WhatsApp source and vendor trees must match the reviewed commit.
-For release notes, the reader accepts explicit passing results for **WhatsApp legal review** and
-**WhatsApp two-phone test** on the same source. A stable tag by itself does not confirm those results.
-Upstream has not agreed on an evidence format. If upstream records
-clearance in another form, adapt the reader to the actual published evidence. Until then the update
-reports a hold. No extra approval dialog is part of a successful release.
+If Git finds overlapping edits it cannot merge, the runner lists the affected paths in the
+private `status.json`. Both branches and the installed app stay at their previous revisions.
+For an upstream conflict, resolve the reported files in the fork. For a conflict with a local
+Mac change, resolve it in the configured Mac source and run `configure.py` on the new commit.
+Click **Update this Mac** again after the fix. Discarding fork commits is unnecessary.
 
-The runner preserves your checkout on a conflict. Merge the conflicting change into fork main and retry.
-After a CI failure, retry to rerun the failing jobs. A new stable tag, fork main commit or configured
-seed supersedes a failed, unsigned candidate. A published tag and its assets are immutable.
+This Mac release can include commits before upstream tags a release. It can include WhatsApp
+changes before upstream publishes a review or phone test and client features before the
+live Signal service supports them. The normal CI, signing, package and copied-profile checks
+still run. A failed build or check stops publication and installation.
+
+Retry to resume an interrupted release. New upstream or fork commits supersede an unsealed
+candidate. Once the runner records the signed artifact hashes, it retries that exact build.
 
 ## Rehearse without publishing
 
