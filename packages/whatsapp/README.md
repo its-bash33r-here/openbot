@@ -46,7 +46,7 @@ notes first. This is not legal advice: get a legal review before a release that 
   through `vendor/baileys/types/`.
 - `bun scripts/whatsapp-signal-e2e.ts`: the vectors, conversations between in-process parties, and,
   when `OPENBOT_WA_ORACLE` names the black-box oracle of the spec author, conversations with it.
-- `bun scripts/messaging-whatsapp-e2e.ts`: the connector against a fake WhatsApp socket.
+- `node --import tsx scripts/messaging-whatsapp-e2e.ts`: the connector against a fake WhatsApp socket.
 
 Only a live test with real phones proves that the Signal code works with WhatsApp. Run one before a
 release that changes `src/signal/` or updates the vendor.

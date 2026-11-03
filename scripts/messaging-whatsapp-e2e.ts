@@ -4,7 +4,7 @@
 // numbered approval answers, the journal replay after a restart, each close code, the send queue while
 // the socket is down, and the disconnect. Runs the real agent service, messaging service, WhatsApp
 // driver, runtime, session and store on a temporary profile. Only the Baileys socket is fake: no
-// message leaves this computer. `bun scripts/messaging-whatsapp-e2e.ts`.
+// message leaves this computer. `node --import tsx scripts/messaging-whatsapp-e2e.ts`.
 // Writes .openbot-build/messaging-whatsapp-e2e/report.json.
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
@@ -29,7 +29,6 @@ import {
   type UserFacingSocketConfig,
   type WAMessage,
 } from "@openbot/whatsapp/baileys";
-import { gc } from "bun";
 import { Effect } from "effect";
 import type { AgentBrowserHost } from "../src/backend/agent/turn-lifecycle";
 import { AgentService } from "../src/backend/agent-service";
@@ -409,17 +408,7 @@ async function boot<T>(use: (services: Booted) => Promise<T>): Promise<T> {
     await runCauseEffect(messaging.stop());
     await runCauseEffect(agents.stop());
     database.close();
-    releaseClosedStores();
   }
-}
-
-/**
- * Bun keeps a closed `node:sqlite` connection, and so the store's exclusive lock, until its statements
- * are collected; Node, which Electron runs, releases it at `close`. This script runs on Bun and opens
- * the same stores again, so it collects them first.
- */
-function releaseClosedStores(): void {
-  gc(true);
 }
 
 /** The store of the linked number while no service runs. The credential store keeps its id and key. */
@@ -503,12 +492,10 @@ try {
     await store.state.keys.set({ session: { "48600100300.0": new Uint8Array([1, 2, 3]) } });
     assert.throws(() => WhatsAppAuthStore.open({ path, key }), WhatsAppStoreLocked);
     store.close();
-    releaseClosedStores();
     const raw = readFileSync(path);
     assert.ok(!raw.includes(Buffer.from(OWNER)), "The store file holds the phone number in clear text.");
     assert.ok(!raw.includes(Buffer.from("noiseKey")), "The store file holds the creds in clear text.");
     assert.throws(() => WhatsAppAuthStore.open({ path, key: newStoreKey() }), WhatsAppStoreUnreadable);
-    releaseClosedStores();
     const again = WhatsAppAuthStore.open({ path, key });
     assert.equal(again.creds.me?.id, `${OWNER}:9@s.whatsapp.net`);
     const session = await again.state.keys.get("session", ["48600100300.0"]);
@@ -849,7 +836,6 @@ try {
         receivedAt: Date.now(),
       });
     store.close();
-    releaseClosedStores();
     return { lostId: lost.key.id ?? "" };
   })();
 
@@ -893,7 +879,6 @@ try {
     const store = openConnectionStore();
     const left = store.unhandled().length;
     store.close();
-    releaseClosedStores();
     assert.equal(left, 0, "A normal stop left messages to replay.");
     return { left };
   });
