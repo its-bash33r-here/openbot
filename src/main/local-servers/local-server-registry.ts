@@ -147,25 +147,33 @@ export class LocalServerRegistry {
       try: () => readFile(this.#pendingPath, "utf8"),
       catch: (cause) => new LocalServerRegistryError({ cause }),
     }).pipe(Effect.result);
+    // Once this file exists it is the whole list, so an inline copy in the servers file is never
+    // actionable. An unreadable file is left in place: its list is unknown, so nothing is pending, and
+    // the registry refuses writes. Nothing is set aside, so the next start sees the same file and the
+    // same refusal, and cannot fall back to the servers file's copy.
     if (Result.isFailure(contents)) {
       const { cause } = contents.failure;
       if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return;
       this.#readOnly = true;
+      this.#removedHostIds = [];
       return yield* contents.failure;
     }
-    // A zero-filled file holds nothing that can be recovered. It counts as an empty list, and the
-    // servers file's copy is not read again: that copy may hold an ID this file has already cleared.
     if (isEmptyStoredFile(contents.success)) {
-      yield* setAsideDamagedFile(this.#pendingPath);
-      this.#pendingOnDisk = [];
+      this.#readOnly = true;
       this.#removedHostIds = [];
       return;
     }
     const file = yield* Effect.try({
       try: () => parseStoredJson(this.#pendingPath, contents.success, decodePendingRemovals),
       catch: (cause) => new LocalServerRegistryError({ cause }),
-    }).pipe(Effect.tapError(() => Effect.sync(() => (this.#readOnly = true))));
-    // Once this file exists it is the whole list. An inline copy in the servers file is ignored.
+    }).pipe(
+      Effect.tapError(() =>
+        Effect.sync(() => {
+          this.#readOnly = true;
+          this.#removedHostIds = [];
+        }),
+      ),
+    );
     this.#pendingOnDisk = file.removedHostIds;
     this.#removedHostIds = file.removedHostIds;
   });

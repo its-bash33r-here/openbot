@@ -366,27 +366,61 @@ try {
       });
     }
 
-    // Scenario 7: a zero-filled pending file counts as an empty list. Its servers-file copy is not read again.
-    {
-      const dir = await mkdtemp(join(temp, "zeros-"));
+    // Scenario 7: an unreadable pending file is kept in place. Its servers-file copy of the list is
+    // never actionable, writes are refused, and two fresh instances agree on every load.
+    for (const [shape, contents] of [
+      ["zero-filled", "\0\0\0\0\0\0\0\0"],
+      ["unparseable", "{not json"],
+    ] as const) {
+      const dir = await mkdtemp(join(temp, `unreadable-${shape}-`));
       const file = join(dir, SERVERS_FILE);
-      const clearedHost = "synthetic-zero-filled-host";
-      await writeFile(file, `${JSON.stringify({ version: 1, servers: [], removedHostIds: [clearedHost] })}\n`);
-      await writeFile(join(dir, PENDING_FILE), "\0\0\0\0\0\0\0\0");
-      const zeroed = await open(Current, file);
-      assert.deepEqual([...zeroed.removedHostIds], [], "A zero-filled pending file holds no removal.");
-      assert.equal(zeroed.readOnly, false, "The registry starts and accepts writes.");
-      assert.ok(
+      const pending = join(dir, PENDING_FILE);
+      const staleInline = "synthetic-stale-inline";
+      await writeFile(
+        file,
+        `${JSON.stringify({ version: 1, servers: [row(12, null, "synthetic-secret-unreadable")], removedHostIds: [staleInline] })}\n`,
+      );
+      await writeFile(pending, contents);
+      // Two fresh instances. An unparseable file fails the load, and a zero-filled one loads as read-only.
+      const instances: RegistryLike[] = [];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const instance = new Current(file);
+        await Effect.runPromise(instance.load().pipe(Effect.result));
+        instances.push(instance);
+      }
+      const [first, second] = instances;
+      assert.ok(first !== undefined && second !== undefined);
+      for (const instance of instances) {
+        assert.deepEqual([...instance.removedHostIds], [], `${shape}: the stale inline ID is not actionable.`);
+        assert.equal(instance.readOnly, true, `${shape}: the registry is read-only.`);
+      }
+      const refused = await Effect.runPromise(
+        second.add(row(13, null, "synthetic-secret-refused"), LIMIT).pipe(Effect.result),
+      );
+      assert.ok(Result.isFailure(refused), `${shape}: writes are refused.`);
+      assert.equal(
+        await readFile(pending, "utf8"),
+        contents,
+        `${shape}: the unreadable file stays in place, unchanged.`,
+      );
+      assert.equal(
         (await readdir(dir)).some((name) => name.startsWith(`${PENDING_FILE}.corrupt-`)),
-        "The damaged pending file is set aside.",
+        false,
+        `${shape}: nothing is set aside.`,
       );
       report.scenarios.push({
-        scenario: "zero-filled-pending-file",
-        build: "current",
-        idsBefore: [clearedHost],
+        scenario: "unreadable-pending-file",
+        build: `current:${shape}`,
+        idsBefore: [staleInline],
         idsAfter: [],
-        retainedServerIds: [],
-        checks: ["zero-filled pending file is set aside", "servers-file copy is not read again"],
+        retainedServerIds: [UUID(12)],
+        checks: [
+          "stale inline ID is not actionable on two fresh loads",
+          "registry is read-only",
+          "writes are refused",
+          "unreadable file kept in place, unchanged",
+          "nothing set aside",
+        ],
       });
     }
 
