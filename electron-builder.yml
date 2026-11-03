@@ -70,6 +70,8 @@ extraResources:
     to: licenses/Electron-LICENSE
   - from: node_modules/electron/dist/LICENSES.chromium.html
     to: licenses/LICENSES.chromium.html
+  - from: packages/whatsapp/vendor/baileys/LICENSE
+    to: licenses/Baileys-LICENSE
   - from: build/licenses/sherpa-onnx-LICENSE
     to: licenses/sherpa-onnx-LICENSE
   - from: build/licenses/onnxruntime-LICENSE

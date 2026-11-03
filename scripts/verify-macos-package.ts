@@ -72,6 +72,7 @@ await Promise.all([
   access(packagedIconPath),
   access(sourceIconPath),
   access(resolve(resourcesPath, "licenses/Electron-LICENSE")),
+  access(resolve(resourcesPath, "licenses/Baileys-LICENSE")),
   access(resolve(resourcesPath, "licenses/LICENSES.chromium.html")),
   access(resolve(resourcesPath, "licenses/sherpa-onnx-LICENSE")),
   access(resolve(resourcesPath, "licenses/onnxruntime-LICENSE")),
