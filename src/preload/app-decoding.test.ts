@@ -26,6 +26,7 @@ import {
   decodeCustomAgentUsage,
   decodeDetectedModelServers,
   decodeDiscoverModelsResult,
+  decodeForkUpdatePhase,
   decodeMobileConnectedDevices,
   decodeMobileConnectTicket,
   decodeNotificationOpenedEvent,
@@ -402,5 +403,14 @@ describe("pending Marketplace listing", () => {
     ["an id that is not text", { kind: "agent", id: 42 }],
   ])("refuses %s", (_name, value) => {
     expect(decodePendingMarketplaceListing(value)).toBeNull();
+  });
+});
+
+describe("fork update status", () => {
+  it("admits only known phases and the unavailable state", () => {
+    expect(decodeForkUpdatePhase("held")).toBe("held");
+    expect(decodeForkUpdatePhase(null)).toBeNull();
+    expect(() => decodeForkUpdatePhase({ phase: "failed", detail: "private" })).toThrow();
+    expect(() => decodeForkUpdatePhase("shell output")).toThrow();
   });
 });

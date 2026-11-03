@@ -22,6 +22,7 @@ import {
   SettingsSection,
   SwitchField,
 } from "@openbot/ui";
+import type { JSX } from "@solidjs/web";
 import { Show } from "solid-js";
 import { useText } from "../../text";
 import { restartReasonKey } from "../updates/restart-reasons";
@@ -37,6 +38,9 @@ const UPDATE_TRACK_LABELS = { Stable: "settings.updates.track.stable" } as const
 
 interface SettingsUpdatesTabProps {
   store: SettingsUpdatesStore;
+  /** Optional update row supplied by the local desktop host. */
+  forkUpdateRow?: JSX.Element;
+  hasForkUpdate?: boolean;
   onOpenWhatsNew?: (() => void) | undefined;
   value: GeneralSettingsValue;
   onUpdateSetting: <Key extends keyof GeneralSettingsValue>(key: Key, value: GeneralSettingsValue[Key]) => void;
@@ -151,33 +155,40 @@ export function SettingsUpdatesTab(props: SettingsUpdatesTabProps) {
             </Select>
           </ItemActions>
         </Item>
-        <Item class="settings-modal-row settings-modal-update-row">
-          <ItemContent>
-            <ItemTitle>{t("settings.updates.version", { version: props.store.installedVersion() })}</ItemTitle>
-            <Show when={!managed()}>
-              <ItemDescription>{t("settings.updates.followsStable")}</ItemDescription>
-            </Show>
-            <ItemDescription class={props.store.messageClass()}>{props.store.message()}</ItemDescription>
-          </ItemContent>
-          {/* The host installs the shared application itself, so a tenant has no action to take. */}
-          <Show when={!managed()}>
-            <ItemActions class="settings-modal-update-actions">
-              <Button
-                variant="outline"
-                type="button"
-                size="sm"
-                loading={props.store.presentation().busy}
-                loadingLabel={props.store.presentation().actionLabel}
-                disabled={!props.store.presentation().supported}
-                onClick={() => void props.store.runAction()}
-              >
-                {props.store.presentation().supported
-                  ? props.store.presentation().actionLabel
-                  : t("settings.updates.unavailable")}
-              </Button>
-            </ItemActions>
-          </Show>
-        </Item>
+        <Show
+          when={props.hasForkUpdate}
+          fallback={
+            <Item class="settings-modal-row settings-modal-update-row">
+              <ItemContent>
+                <ItemTitle>{t("settings.updates.version", { version: props.store.installedVersion() })}</ItemTitle>
+                <Show when={!managed()}>
+                  <ItemDescription>{t("settings.updates.followsStable")}</ItemDescription>
+                </Show>
+                <ItemDescription class={props.store.messageClass()}>{props.store.message()}</ItemDescription>
+              </ItemContent>
+              {/* The host installs the shared application itself, so a tenant has no action to take. */}
+              <Show when={!managed()}>
+                <ItemActions class="settings-modal-update-actions">
+                  <Button
+                    variant="outline"
+                    type="button"
+                    size="sm"
+                    loading={props.store.presentation().busy}
+                    loadingLabel={props.store.presentation().actionLabel}
+                    disabled={!props.store.presentation().supported}
+                    onClick={() => void props.store.runAction()}
+                  >
+                    {props.store.presentation().supported
+                      ? props.store.presentation().actionLabel
+                      : t("settings.updates.unavailable")}
+                  </Button>
+                </ItemActions>
+              </Show>
+            </Item>
+          }
+        >
+          {props.forkUpdateRow}
+        </Show>
         <Show when={props.store.idleRestartOffered()}>
           <Item data-settings-row="settings.updates.idleRestart.title" class="settings-modal-row">
             <ItemContent>

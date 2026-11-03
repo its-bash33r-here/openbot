@@ -666,6 +666,11 @@ Installed builds check GitHub Releases for updates and expose download/restart c
 popover. Release signing secrets and the complete procedure are documented in
 [docs/RELEASING.md](docs/RELEASING.md).
 
+On a Mac configured to publish this fork, select the local server and open **Settings → Updates →
+Update this Mac**. This action checks upstream, verifies the release, publishes it and installs it
+when OpenBot is idle. The Updates page shows the current phase. A conflict or release hold stops
+the run. After you resolve it, click **Update this Mac** to retry.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Before we merge a contribution, each

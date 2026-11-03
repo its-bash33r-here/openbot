@@ -156,6 +156,7 @@ import {
   decodeExternalLinkBrowsers,
   decodeExternalLinkFallback,
   decodeExternalLinkPreference,
+  decodeForkUpdatePhase,
   decodeGitHubConnectorRepositories,
   decodeGitHubConnectorStatus,
   decodeHostedServer,
@@ -1364,6 +1365,8 @@ const openbotApi: OpenBotDesktopApi = {
       ipcRenderer.invoke(IPC_ENDPOINTS.browserInput.sendLiveViewInput.channel, input).then(decodeVoid),
   },
   update: bridgeGroup(IPC_ENDPOINTS.update, {
+    getForkPhase: decodeForkUpdatePhase,
+    startFork: decodeForkUpdatePhase,
     getStatus: decodeUpdateStatus,
     check: decodeUpdateStatus,
     download: decodeUpdateStatus,

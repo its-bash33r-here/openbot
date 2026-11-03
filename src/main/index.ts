@@ -6,6 +6,7 @@ import {
   type CentralAuthState,
   type HostStatus,
   IPC_ENDPOINTS,
+  LOCAL_SERVER_ID,
 } from "@openbot/contracts/ipc";
 import { createFormat, localeDirection, resolveLocale, translateFor } from "@openbot/i18n";
 import { localizeSourceText } from "@openbot/i18n/source";
@@ -48,6 +49,7 @@ import {
 } from "./development-profile";
 import { stopStuckExitAfterLimit } from "./exit-watchdog";
 import { filePreviewPages } from "./file-preview-pages";
+import { ForkUpdate } from "./fork-update";
 import { hostAllowsTenantLaunch } from "./host-update-coordinator";
 import { takeHostedServerEnvironment } from "./hosted-server-bootstrap";
 import { takeHostingDeveloperKey } from "./hosted-server-service";
@@ -806,7 +808,28 @@ function registerIpcHandlers({
       getMainWindow: getDialogParent,
       translate: language.translate,
     }),
-    ...updateIpcHandlers({ updater, updatePreferenceFile, requestedUpdate, idleRestart }),
+    ...updateIpcHandlers({
+      updater,
+      updatePreferenceFile,
+      requestedUpdate,
+      idleRestart,
+      forkUpdate: new ForkUpdate({
+        mainWindow: () => windowHolder.current,
+        enabled: () =>
+          app.isPackaged &&
+          process.platform === "darwin" &&
+          process.execPath === "/Applications/OpenBot.app/Contents/MacOS/OpenBot" &&
+          !commandLineUserDataDirectory &&
+          !serverMode &&
+          !hostedServer &&
+          !localServerChild &&
+          remoteServers.activeServerId === LOCAL_SERVER_ID &&
+          !updater.getStatus().managedByHost,
+        idleRestart,
+        childrenRunning: () => (localServers?.pids().size ?? 0) > 0,
+        quit: () => quitFor("update"),
+      }),
+    }),
     ...notificationIpcHandlers({
       notificationPreference,
       translate: language.translate,

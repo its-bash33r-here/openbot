@@ -12,6 +12,18 @@ export const messages = {
   "update.action.retryDownload": "重试下载",
   "update.managedByHost": "由主机管理",
   "update.upToDate": "已是最新",
+  "update.fork.title": "分支更新",
+  "update.fork.start": "更新这台 Mac",
+  "update.fork.idle": "同步并检查源代码，发布已签名的版本，并在空闲时安装。",
+  "update.fork.syncing": "正在同步源代码…",
+  "update.fork.checking": "正在运行检查…",
+  "update.fork.signing": "正在签名和公证…",
+  "update.fork.publishing": "正在发布版本…",
+  "update.fork.installing": "正在等待 OpenBot 退出以安装更新…",
+  "update.fork.complete": "更新已安装。",
+  "update.fork.conflict": "源代码存在冲突。请解决后重试。",
+  "update.fork.held": "请查看发布报告以处理未通过的检查。",
+  "update.fork.failed": "更新失败。请查看发布报告后重试。",
 
   // The provider CLI update notification.
   "update.provider.update": "更新",

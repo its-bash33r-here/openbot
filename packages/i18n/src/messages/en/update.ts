@@ -11,6 +11,18 @@ export const messages = defineMessages("update", {
   "update.action.retryDownload": "Retry download",
   "update.managedByHost": "Managed by host",
   "update.upToDate": "Up to date",
+  "update.fork.title": "Fork updates",
+  "update.fork.start": "Update this Mac",
+  "update.fork.idle": "Sync the source, check it, publish a signed release, and install it when idle.",
+  "update.fork.syncing": "Syncing source…",
+  "update.fork.checking": "Running checks…",
+  "update.fork.signing": "Signing and notarizing…",
+  "update.fork.publishing": "Publishing the release…",
+  "update.fork.installing": "Waiting for OpenBot to close and install…",
+  "update.fork.complete": "Update installed.",
+  "update.fork.conflict": "Source changes conflict. Resolve them and retry.",
+  "update.fork.held": "Release checks need attention. Check the release report.",
+  "update.fork.failed": "Update failed. Check the release report and retry.",
 
   // The provider CLI update notification.
   "update.provider.update": "Update",

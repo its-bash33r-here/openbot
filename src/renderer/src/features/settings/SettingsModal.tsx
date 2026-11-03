@@ -43,6 +43,7 @@ import { createSettingsUpdatesStore } from "@openbot/ui/features/settings/stores
 import { createEffect, createSignal, Show, untrack } from "solid-js";
 import { useI18n } from "../../i18n-context";
 import { ComputerUseSetup } from "../computer-use/ComputerUseSetup";
+import { createForkUpdateSettings } from "./fork-update-settings";
 import { licenseContactUs, trackLicenseEvent } from "./license-analytics";
 import { createNotificationLevelsStore } from "./notification-levels-store";
 import { createProfileActivityStore } from "./profile-activity-store";
@@ -141,6 +142,14 @@ export function SettingsModal(props: SettingsModalProps) {
   );
   const mobileConnect = createSettingsMobileConnectStore(props, () => activeTab() === "mobile-connect");
   const updates = createSettingsUpdatesStore(props);
+  const forkUpdate = createForkUpdateSettings(
+    () =>
+      props.open &&
+      activeTab() === "updates" &&
+      props.appInfo?.platform === "darwin" &&
+      !props.chatWindow &&
+      props.servers?.some((server) => server.active && server.kind === "local") === true,
+  );
   const billing = createBillingStore(
     () => props.billingApi,
     () => props.open && activeTab() === "billing",
@@ -389,6 +398,8 @@ export function SettingsModal(props: SettingsModalProps) {
           {preferencesLoadError()}
           <SettingsUpdatesTab
             store={updates}
+            hasForkUpdate={forkUpdate.available()}
+            forkUpdateRow={<forkUpdate.Row />}
             onOpenWhatsNew={props.onOpenWhatsNew}
             value={props.value}
             onUpdateSetting={updateSetting}

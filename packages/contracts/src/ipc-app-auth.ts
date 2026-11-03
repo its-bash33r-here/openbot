@@ -31,6 +31,26 @@ export const UPDATE_PHASES = [
   "unsupported",
 ] as const;
 
+export const FORK_UPDATE_PHASES = [
+  "idle",
+  "syncing",
+  "checking",
+  "signing",
+  "publishing",
+  "installing",
+  "upToDate",
+  "complete",
+  "conflict",
+  "held",
+  "failed",
+] as const;
+
+export type ForkUpdatePhase = (typeof FORK_UPDATE_PHASES)[number];
+
+export function forkUpdateInProgress(phase: ForkUpdatePhase): boolean {
+  return ["syncing", "checking", "signing", "publishing", "installing"].includes(phase);
+}
+
 export type UpdatePhase = (typeof UPDATE_PHASES)[number];
 
 /**

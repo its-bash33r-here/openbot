@@ -158,6 +158,7 @@ import type {
   ComputerUseState,
   ExportResult,
   ExternalDestination,
+  ForkUpdatePhase,
   HostUpdateSettingsChange,
   HostUpdateStatus,
   IdleRestartTarget,
@@ -1400,6 +1401,9 @@ export const IPC_ENDPOINTS = {
     event: event<CentralAuthState>()("auth:event"),
   },
   update: {
+    // Local owner Settings only. No server, path, command or arguments cross this boundary.
+    getForkPhase: request<undefined, ForkUpdatePhase | null>()("update:get-fork-phase"),
+    startFork: request<undefined, ForkUpdatePhase | null>()("update:start-fork"),
     getStatus: request<undefined, UpdateStatus>()("update:get-status"),
     check: request<undefined, UpdateStatus>()("update:check"),
     download: request<undefined, UpdateStatus>()("update:download"),

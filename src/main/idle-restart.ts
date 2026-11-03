@@ -58,6 +58,7 @@ export class IdleRestart {
    * this process can only quit or start again, which a later relaunch request still does.
    */
   #handedOff = false;
+  #forkQuit: (() => boolean) | null = null;
 
   constructor(options: IdleRestartOptions) {
     this.#updater = options.updater;
@@ -70,9 +71,22 @@ export class IdleRestart {
     this.#pollMs = options.pollMs ?? DEFAULT_POLL_MS;
   }
 
+  /** The detached installer relaunches OpenBot after the normal quit and its backup. */
+  requestForkQuit(quit: () => boolean): void {
+    if (this.#status || this.#restarting) return;
+    this.request("relaunch");
+    this.#forkQuit = quit;
+  }
+
+  endForkQuit(): void {
+    if (!this.#forkQuit || this.#restarting) return;
+    this.#forkQuit = null;
+    this.cancel();
+  }
+
   /** A second request replaces the target of the first. */
   request(target: IdleRestartTarget): UpdateStatus {
-    if (this.#restarting || this.#updater.getStatus().phase === "installing") {
+    if (this.#forkQuit || this.#restarting || this.#updater.getStatus().phase === "installing") {
       throw new Error(sourceText("error.update.alreadyRestarting"));
     }
     if (target === "update") {
@@ -92,7 +106,7 @@ export class IdleRestart {
 
   /** Removes the restart, or the error of the last one, and lets the routines run. */
   cancel(): UpdateStatus {
-    if (this.#restarting) throw new Error(sourceText("error.update.alreadyRestarting"));
+    if (this.#forkQuit || this.#restarting) throw new Error(sourceText("error.update.alreadyRestarting"));
     if (this.#status && !this.#status.error) this.#log("The restart when idle was cancelled.");
     this.#end(null);
     return this.#updater.getStatus();
@@ -128,7 +142,12 @@ export class IdleRestart {
     this.#keepHold();
     if (status.target === "relaunch") {
       this.#log("Restarting OpenBot: no work runs.");
-      this.#relaunch();
+      if (this.#forkQuit) {
+        if (!this.#forkQuit()) {
+          this.#restarting = false;
+          this.#schedule(this.#pollMs);
+        }
+      } else this.#relaunch();
       return;
     }
     this.#log("Installing the update: no work runs.");

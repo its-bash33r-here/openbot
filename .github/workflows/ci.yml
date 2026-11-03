@@ -179,6 +179,9 @@ jobs:
       - name: Run the browser smoke test
         run: xvfb-run -a bun run test:browser
 
+      - name: Check the owner update gesture in an isolated browser world
+        run: bun scripts/fork-update-click-e2e.ts
+
       - name: Run the agent browser session E2E
         run: xvfb-run -a bun run test:browser-agent-session
 

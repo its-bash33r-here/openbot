@@ -3140,6 +3140,8 @@ export function createMockOpenBot(options: MockOpenBotOptions = {}): MockOpenBot
     },
     browser: mockBrowser.browser,
     update: {
+      getForkPhase: async () => null,
+      startFork: async () => null,
       getStatus: async () => clone(updateStatus),
       check: async () => {
         updateStatus = { ...updateStatus, phase: "up-to-date", availableVersion: null };

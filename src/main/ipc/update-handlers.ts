@@ -1,15 +1,17 @@
 // The application updater, its preferences, and the restart an admin of a joined server asked for.
 
 import { runCauseEffect } from "../../backend/effect-boundary";
+import type { ForkUpdate } from "../fork-update";
 import type { IdleRestart } from "../idle-restart";
 import type { RequestedUpdate } from "../requested-update";
 import { readUpdatePreference } from "../update-preference-store";
 import type { UpdateService } from "../update-service";
 import { parseIdleRestartTarget, parseUpdatePreference } from "./app-inputs";
-import { handler, type IpcGroupHandlers, payloadHandler } from "./define-ipc-group";
+import { eventHandler, handler, type IpcGroupHandlers, payloadHandler } from "./define-ipc-group";
 
 export interface UpdateIpcDependencies {
   updater: UpdateService;
+  forkUpdate: ForkUpdate;
   updatePreferenceFile: string;
   requestedUpdate: Pick<RequestedUpdate, "cancel" | "setPreference">;
   idleRestart: Pick<IdleRestart, "request" | "cancel">;
@@ -17,12 +19,15 @@ export interface UpdateIpcDependencies {
 
 export function updateIpcHandlers({
   updater,
+  forkUpdate,
   updatePreferenceFile,
   requestedUpdate,
   idleRestart,
 }: UpdateIpcDependencies): Pick<IpcGroupHandlers, "update"> {
   return {
     update: {
+      getForkPhase: eventHandler((event) => runCauseEffect(forkUpdate.phase(event))),
+      startFork: eventHandler((event) => runCauseEffect(forkUpdate.start(event))),
       getStatus: handler(() => updater.getStatus()),
       check: handler(() => runCauseEffect(updater.checkForUpdates())),
       download: handler(() => runCauseEffect(updater.downloadUpdate())),

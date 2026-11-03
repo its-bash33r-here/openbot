@@ -54,6 +54,8 @@ import {
   type ExternalLinkBrowsers,
   type ExternalLinkFallback,
   type ExternalLinkPreference,
+  FORK_UPDATE_PHASES,
+  type ForkUpdatePhase,
   type GitHubConnectorRepositories,
   type GitHubConnectorStatus,
   type HostedSiteList,
@@ -350,6 +352,11 @@ export function decodeAccountSessions(value: unknown): AccountSession[] {
       ...(hostedServer === undefined ? {} : { hostedServer }),
     };
   });
+}
+
+export function decodeForkUpdatePhase(value: unknown): ForkUpdatePhase | null {
+  if (value === null || isOneOf(FORK_UPDATE_PHASES, value)) return value;
+  throw new Error("Invalid fork update phase.");
 }
 
 export function decodeUpdateStatus(value: unknown): UpdateStatus {
