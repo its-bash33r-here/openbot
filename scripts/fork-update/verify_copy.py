@@ -23,6 +23,29 @@ def contains_saved(old, new):
     return type(old) is type(new) and old == new
 
 
+def saved_message(old, new):
+    if contains_saved(old, new):
+        return True
+    # MailboxStore rebuilds both arrays from the same deliveries on boot. SQLite loads those by
+    # creation time and delivery ID. Two deliveries created together can exchange positions.
+    def ordered_view(message):
+        exchange = message.get("exchange")
+        if (message.get("author") != "agent" or message.get("status") != "completed"
+                or not isinstance(exchange, dict) or exchange.get("direction") != "incoming"):
+            return None
+        deliveries = exchange.get("deliveries")
+        if not isinstance(deliveries, list) or not all(isinstance(d, dict) and isinstance(d.get("id"), str)
+                                                       and isinstance(d.get("recipientAgentId"), str) for d in deliveries):
+            return None
+        if (exchange.get("recipientAgentIds") != [d["recipientAgentId"] for d in deliveries]
+                or len({d["id"] for d in deliveries}) != len(deliveries)):
+            return None
+        rest = {k: v for k, v in exchange.items() if k not in ("recipientAgentIds", "deliveries")}
+        return {**message, "exchange": rest}, sorted(json.dumps(d, sort_keys=True) for d in deliveries)
+    left, right = ordered_view(old), ordered_view(new)
+    return left is not None and right is not None and left[1] == right[1] and contains_saved(left[0], right[0])
+
+
 def check_workspaces(before, after):
     # An update may create new files. Existing files, links and directories must survive.
     if not before.exists():
@@ -67,7 +90,8 @@ def check_chats(before, after):
         for table, keys, fields in [
             ("projection_agents", ["agent_id"], ["thread_id"]),
             ("projection_threads", ["thread_id"], ["agent_id", "title"]),
-            ("projection_thread_messages", ["thread_id", "message_id"], ["author", "message_json"]),
+            ("projection_thread_messages", ["thread_id", "message_id"],
+             ["created_at", "ordinal", "turn_id", "author", "status", "item_type", "message_json"]),
         ]:
             count = 0
             for row in old.execute(f"SELECT {', '.join(keys + fields)} FROM {table}"):
@@ -76,7 +100,7 @@ def check_chats(before, after):
                                       " AND ".join(f"{k} = ?" for k in keys), row[:len(keys)]).fetchone()
                 require(current is not None, f"The upgrade lost rows from {table}.")
                 if fields[-1] == "message_json":
-                    require(saved[0] == current[0] and contains_saved(json.loads(saved[1]), json.loads(current[1])),
+                    require(saved[:-1] == current[:-1] and saved_message(json.loads(saved[-1]), json.loads(current[-1])),
                             "An existing chat message changed.")
                 else:
                     require(saved == current, f"Existing data changed in {table}.")
