@@ -1,9 +1,12 @@
 // Run: bun scripts/mobile-qa-routing-smoke.ts
-// Exercises the real instruction generator without starting a provider or device.
+// Exercises the real instruction generator and the real Appium classifier without starting a provider
+// or a device. Each case builds MCP configurations, and derives "Appium configured" the way the thread
+// lifecycle does: the per-agent list, then the Appium classifier.
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
-import { type AgentSummary, DEFAULT_AGENT_DEFAULTS } from "@openbot/contracts/ipc";
+import { type AgentSummary, DEFAULT_AGENT_DEFAULTS, type McpServerConfig } from "@openbot/contracts/ipc";
 import { developerInstructions } from "../src/backend/agent/developer-instructions";
+import { agentMcpServers, isAppiumMcpServer } from "../src/backend/mcp-provider-shapes";
 
 const agent: AgentSummary = {
   id: "synthetic-routing",
@@ -22,7 +25,34 @@ const agent: AgentSummary = {
   avatarHue: null,
   avatarUrl: null,
 };
-// Tool identifiers and capability keys that the iOS recipe must expose only when Appium QA is allowed.
+
+function server(overrides: Partial<McpServerConfig> & Pick<McpServerConfig, "id" | "name">): McpServerConfig {
+  return {
+    transport: "stdio",
+    enabled: true,
+    command: "npx",
+    args: [],
+    env: [],
+    envPassthrough: [],
+    workingDirectory: "",
+    url: "",
+    headers: [],
+    ...overrides,
+  };
+}
+
+/** A registered Appium MCP server, as a user registers it from npx, and an unrelated server. */
+const appium = server({ id: "synthetic-appium", name: "appium-mcp", args: ["-y", "appium-mcp"] });
+const unrelated = server({
+  id: "synthetic-github",
+  name: "github",
+  transport: "http",
+  command: "",
+  url: "https://example.invalid/mcp",
+});
+const registrations = { registered: [appium, unrelated], unregistered: [unrelated] } as const;
+
+// Tool identifiers and capability keys that the iOS recipe must expose only when Appium is configured and allowed.
 const IOS_RECIPE_IDENTIFIERS = [
   "appium_session_management",
   "select_device",
@@ -33,34 +63,76 @@ const IOS_RECIPE_IDENTIFIERS = [
   "appium:forceAppLaunch false",
   "appium:shouldTerminateApp false",
 ];
-const cases = [];
-for (const computerUse of [true, false]) {
-  for (const sideThread of [true, false]) {
-    for (const computerUseInOwnChat of [true, false]) {
-      const text = developerInstructions(
-        { ...agent, computerUse },
-        "/synthetic/shared",
-        [],
-        "/synthetic/automation",
-        DEFAULT_AGENT_DEFAULTS,
-        { sideThread, computerUseInOwnChat },
-      );
-      const allowed = computerUse && !sideThread && !computerUseInOwnChat;
-      assert.equal(text.includes("use the registered Appium MCP tools"), allowed);
-      assert.equal(text.includes("QA through Appium is not permitted"), !allowed);
-      assert.ok(text.includes("Use openbot_browser tools for browser work"));
-      assert.ok(text.includes("Never ask for a secret in chat"));
-      if (computerUse) assert.ok(text.includes("for desktop GUI tasks outside the embedded browser"));
-      else assert.ok(text.toLowerCase().includes("do not control desktop applications outside the embedded browser"));
-      if (allowed) {
-        assert.ok(text.includes("Tool registration is not permission"));
-        assert.ok(text.includes("take over a device without explicit approval"));
-        assert.ok(text.includes("do not ask the user to relay prompts"));
-        for (const identifier of IOS_RECIPE_IDENTIFIERS) assert.ok(text.includes(identifier), identifier);
-      } else {
-        for (const identifier of IOS_RECIPE_IDENTIFIERS) assert.ok(!text.includes(identifier), identifier);
+const UPSTREAM_QA_SENTENCE = "For explicitly scoped native iOS or Android QA, use the registered Appium MCP tools";
+const DENIED_QA_SENTENCE = "QA through Appium is not permitted";
+
+interface RoutingCase {
+  registration: string;
+  computerUse: boolean;
+  sideThread: boolean;
+  computerUseInOwnChat: boolean;
+  permitted: boolean;
+  appiumConfigured: boolean;
+  recipe: boolean;
+  status: "pass";
+}
+const cases: RoutingCase[] = [];
+for (const [registration, configs] of Object.entries(registrations)) {
+  for (const computerUse of [true, false]) {
+    for (const sideThread of [true, false]) {
+      for (const computerUseInOwnChat of [true, false]) {
+        // The same rule as ThreadLifecycle: the per-agent list, then the Appium classifier.
+        const appiumConfigured = agentMcpServers(configs, computerUse).some(isAppiumMcpServer);
+        const text = developerInstructions(
+          { ...agent, computerUse },
+          "/synthetic/shared",
+          [],
+          "/synthetic/automation",
+          DEFAULT_AGENT_DEFAULTS,
+          { sideThread, computerUseInOwnChat, appiumConfigured },
+        );
+        const permitted = computerUse && !sideThread && !computerUseInOwnChat;
+        assert.equal(
+          appiumConfigured,
+          registration === "registered" && computerUse,
+          "The classifier matches the list.",
+        );
+        // Without a configured Appium server there is no Appium line at all, as upstream. With one, the rule
+        // is present when permitted, and the denial when a side thread or a Computer Use task denies it.
+        assert.equal(
+          text.includes(UPSTREAM_QA_SENTENCE),
+          appiumConfigured && permitted,
+          "The rule needs Appium and permission.",
+        );
+        assert.equal(
+          text.includes(DENIED_QA_SENTENCE),
+          appiumConfigured && !permitted,
+          "The denial needs Appium and no permission.",
+        );
+        assert.ok(text.includes("Use openbot_browser tools for browser work"));
+        assert.ok(text.includes("Never ask for a secret in chat"));
+        if (computerUse) assert.ok(text.includes("for every GUI task outside the embedded browser"));
+        else assert.ok(text.toLowerCase().includes("do not control desktop applications outside the embedded browser"));
+        if (permitted && appiumConfigured) {
+          assert.ok(text.includes("Tool registration is not permission"));
+          assert.ok(text.includes("take over a device without explicit approval"));
+          assert.ok(text.includes("do not ask the user to relay prompts"));
+        }
+        for (const identifier of IOS_RECIPE_IDENTIFIERS) {
+          const expected = permitted && appiumConfigured;
+          assert.equal(text.includes(identifier), expected, `${identifier} is ${expected ? "present" : "absent"}.`);
+        }
+        cases.push({
+          registration,
+          computerUse,
+          sideThread,
+          computerUseInOwnChat,
+          permitted,
+          appiumConfigured,
+          recipe: permitted && appiumConfigured,
+          status: "pass",
+        });
       }
-      cases.push({ computerUse, sideThread, computerUseInOwnChat, allowed, status: "pass" });
     }
   }
 }

@@ -186,7 +186,7 @@ function isAppiumMcpExecutable(command: string): boolean {
  * count, so a lookalike name or package does not match. It drives a simulator or device, so it
  * follows the same Computer Use rule.
  */
-function isAppiumMcpServer(config: McpServerConfig): boolean {
+export function isAppiumMcpServer(config: McpServerConfig): boolean {
   if (config.name.trim().toLowerCase() === APPIUM_MCP_SERVER_NAME) return true;
   if (config.transport !== "stdio") return false;
   if (isAppiumMcpExecutable(config.command)) return true;
