@@ -3,6 +3,10 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
+import shutil
+import signal
+import uuid
 import tempfile
 
 import update as u
@@ -68,8 +72,128 @@ if "patch" in sys.argv:
            "p.open('a').write(('prepare' if '--prepare' in sys.argv else 'install')+'\\n')")
 
 
+def assisted_release(folder, bun):
+    root = folder / "assisted"
+    root.mkdir()
+    u.ROOT = root / "owner"
+    u.ROOT.mkdir()
+    fixture_services(root)
+    os.environ["PATH"] = str(root) + os.pathsep + os.environ["PATH"]
+    fork, upstream, src = (root / name for name in ("fork.git", "up.git", "src"))
+    for repo in (fork, upstream):
+        u.command("git", "init", "--bare", repo)
+    u.repo_url = lambda name: str(fork if name == u.FORK else upstream)
+    u.command("git", "init", "-b", "main", src)
+    u.git(src, "config", "user.name", "Fixture")
+    u.git(src, "config", "user.email", "test@example.invalid")
+    (src / "package.json").write_text('{"version":"1.0.0"}')
+    (src / "changelog.d").mkdir()
+    (src / "changelog.d/fixture.md").write_text("notes")
+    (src / "CHANGELOG.md").write_text("base")
+    (src / "guide.md").write_text("heading\nend\n")
+    u.git(src, "add", ".")
+    u.git(src, "commit", "-m", "base")
+    seed = u.git(src, "rev-parse", "HEAD")
+    cfg = {"seed": seed, "source": str(src)}
+    for repo, edit in ((fork, "Fork setting"), (upstream, "Upstream setting")):
+        u.git(src, "switch", "--detach", seed)
+        (src / "guide.md").write_text("heading\n" + edit + "\nend\n")
+        u.git(src, "commit", "-am", edit)
+        u.git(src, "push", str(repo), "HEAD:refs/heads/main")
+    original = u.remote_ref(u.FORK, "refs/heads/main")
+    run = u.ROOT / "run"
+    run.mkdir(mode=0o700)
+    nonce = str(uuid.uuid4())
+    os.environ.update(OPENBOT_FORK_UPDATE_RUN=str(run), OPENBOT_FORK_UPDATE_NONCE=nonce,
+                      OPENBOT_FORK_UPDATE_MERGE="1", OPENBOT_FORK_UPDATE_PID=str(os.getpid()))
+    def expect(phase, probe=False):
+        try:
+            u.update(cfg, probe=probe)
+        except u.Stop as exc:
+            assert exc.phase == phase, str(exc)
+        else:
+            raise AssertionError("Expected " + phase)
+    events = run / "fixture-events"
+    expect("conflict", probe=True)
+    assert not (run / "merge-request.json").exists()
+    assert u.remote_ref(u.FORK, "refs/heads/main") == original
+    bridge = [bun, Path(__file__).with_name("merge-fixture.ts"), str(run), nonce]
+    synthetic = {"nonce": str(uuid.uuid4()), "id": str(uuid.uuid4()), "path": "guide.md",
+                 "merge": "the saved Mac changes", "sides": {"2": "1234567890", "3": "0987654321"},
+                 "hunk": {"base": "", "current": "example", "incoming": "second example"}}
+    u.save(run / "merge-request.json", synthetic)
+    subprocess.run([*bridge, "once"], check=True)
+    assert not events.exists() and not (run / "merge-response.json").exists()
+    synthetic["nonce"] = nonce
+    synthetic["hunk"]["current"] = "password=example-pass-1234"
+    u.save(run / "merge-request.json", synthetic)
+    (run / "fixture-mode").write_text("ask")
+    subprocess.run([*bridge, "once"], check=True)
+    assert events.read_text().splitlines() == ["window guide.md"]
+    assert u.read(run / "merge-response.json")["action"] == "later"
+    synthetic.update(id=str(uuid.uuid4()), hunk={"base": "Show one faint star.\n",
+                     "current": "Show two faint star.\n", "incoming": "Show one bright stars.\n"})
+    u.save(run / "merge-request.json", synthetic)
+    (run / "fixture-mode").write_text("words")
+    subprocess.run([*bridge, "once"], check=True)
+    assert u.read(run / "merge-response.json").get("text") == "Show two bright stars.\n"
+    assert events.read_text().splitlines() == ["window guide.md", "model"]
+    for path in ("merge-request.json", "merge-response.json", "fixture-events"):
+        (run / path).unlink()
+    worker = subprocess.Popen(bridge)
+    def timed_out(*_args):
+        raise TimeoutError("The app merge fixture did not answer in time.")
+    previous_handler = signal.signal(signal.SIGALRM, timed_out)
+    signal.alarm(90)
+    try:
+        for mode in ("invent", "ask", "auto"):
+            (run / "fixture-mode").write_text(mode)
+            expect("failed" if mode == "auto" else "conflict")
+            assert u.remote_ref(u.FORK, "refs/heads/main") == original
+            assert not u.remote_ref(u.FORK, "refs/tags/1.0.1") and not (u.ROOT / "installs").exists()
+        assert events.read_text().splitlines() == ["model", "window guide.md", "model", "window guide.md", "model"]
+        tx = u.read(u.ROOT / "pending.json")
+        assert tx["priorMain"] == original and tx["forkMain"] != original
+        assert u.git(fork, "show", tx["commit"] + ":guide.md").splitlines() == [
+            "heading", "Fork setting", "Upstream setting", "end"]
+        # Retry the exact checked commit. A complete dry-run install is permitted only after CI passes.
+        service = u.read(root / "github.json")
+        service["interrupt"] = False
+        u.save(root / "github.json", service)
+        u.update(cfg)
+        assert u.remote_ref(u.FORK, "refs/heads/main") == tx["forkMain"]
+        assert u.remote_ref(u.FORK, "refs/tags/1.0.1") == tx["commit"]
+        assert (u.ROOT / "installs").read_text().splitlines() == ["prepare", "install"]
+        assert events.read_text().splitlines().count("model") == 3
+        # A delete/edit conflict needs a whole-file decision and never calls the model.
+        u.git(src, "fetch", str(fork), "refs/heads/main")
+        u.git(src, "switch", "--detach", "FETCH_HEAD")
+        u.git(src, "rm", "guide.md")
+        u.git(src, "commit", "-m", "delete guide in fork")
+        u.git(src, "push", str(fork), "HEAD:main")
+        u.git(src, "fetch", str(upstream), "refs/heads/main")
+        u.git(src, "switch", "--detach", "FETCH_HEAD")
+        (src / "guide.md").write_text("new upstream guide\n")
+        u.git(src, "commit", "-am", "edit guide upstream")
+        u.git(src, "push", str(upstream), "HEAD:main")
+        (run / "fixture-mode").write_text("choose")
+        updated = u.candidate(cfg)
+        assert u.git(u.ROOT / updated["batch"] / "source", "show", "HEAD:guide.md") == "new upstream guide"
+        assert events.read_text().splitlines()[-1] == "window guide.md"
+        assert events.read_text().splitlines().count("model") == 3
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        worker.terminate()
+        worker.wait(timeout=5)
+        for key in (*u.QUIT_ENV, "OPENBOT_FORK_UPDATE_MERGE"):
+            os.environ.pop(key, None)
+
+
 def main():
     os.umask(0o077)
+    bun = shutil.which("bun")
+    assert bun, "The native merge fixture requires Bun."
     out = Path(__file__).resolve().parents[2] / ".openbot-build/fork-release-e2e/report.json"
     with tempfile.TemporaryDirectory() as temp:
         folder = Path(temp).resolve()
@@ -199,9 +323,12 @@ def main():
         u.git(src, "push", str(origin), "HEAD:refs/heads/" + u.BRANCH)
         expect("failed")
         assert u.git(origin, "show", u.BRANCH + ":unmerged-code") == "keep this manual fix"
+        assisted_release(folder, bun)
         out.parent.mkdir(parents=True,exist_ok=True)
         u.save(out,{"realGit":True,"services":"local fixtures","cases":["no-push probe","untagged upstream main synced to fork main","CI failure","partial upload",
-               "resume same commit","install after published checksums","up to date","second release preserves both fork changes","merge conflict","fork and upstream conflict preserves branches","no WhatsApp or Signal clearance","manual release branch change preserved"]})
+               "resume same commit","install after published checksums","up to date","second release preserves both fork changes","merge conflict","fork and upstream conflict preserves branches","no WhatsApp or Signal clearance","manual release branch change preserved",
+               "app model combines two edits", "ambiguous and invalid model replies use owner window",
+               "failed checks retain public main", "retry retains approved resolution", "owner chooses file for delete/edit conflict", "wrong click nonce refused", "credential-like hunk stays local", "independent word edits combine on one line"]})
     print(out)
 
 

@@ -13,6 +13,10 @@ import tempfile
 import time
 import urllib.request
 
+# The installed owner command uses isolated Python. Load its pinned sibling only.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import merge_assist
+
 ROOT = Path.home() / "Library/Application Support/OpenBot Fork Updates"
 FORK = "its-bash33r-here/openbot"
 UPSTREAM = "nightly-labs/openbot"
@@ -111,14 +115,26 @@ def installed():
     return info["CFBundleShortVersionString"]
 
 
-def merge(work, ref, label):
+def merge(work, ref, label, probe):
     if git(work, "merge-base", "--is-ancestor", ref, "HEAD", check=False) == 0:
-        return
-    if git(work, "merge", "--no-edit", ref, check=False):
-        paths = git(work, "diff", "--name-only", "--diff-filter=U").splitlines()
-        if paths:
-            raise Stop("conflict", label + " conflicts in " + ", ".join(paths[:8]) + ". Resolve the merge, then retry.")
+        return False
+    if not git(work, "-c", "merge.conflictStyle=diff3", "merge", "--no-edit", ref, check=False):
+        return False
+    entries = git(work, "ls-files", "--unmerged", "-z")
+    if not entries:
         raise Stop("failed", "Git could not merge " + label + ".")
+    if probe or os.environ.get("OPENBOT_FORK_UPDATE_MERGE") != "1":
+        paths = [row.split("\t", 1)[-1] for row in entries.rstrip("\0").split("\0")]
+        raise Stop("conflict", label + " conflicts in " + ", ".join(dict.fromkeys(paths))[:400] + ".")
+    try:
+        merge_assist.resolve(work, git, entries, label)
+    except merge_assist.MergePaused as error:
+        raise Stop("conflict", str(error)) from error
+    require(not git(work, "ls-files", "--unmerged") and
+            not git(work, "diff", "--cached", "--check", check=False), "The resolved merge did not pass Git checks.")
+    command("bun", "install", "--frozen-lockfile", cwd=work)
+    git(work, "commit", "--no-edit")
+    return True
 
 
 def candidate(config, probe=False):
@@ -159,16 +175,16 @@ def candidate(config, probe=False):
     keep = False
     try:
         # Reproduce GitHub's Update branch on the fork. Release-only changes stay on the Mac branch.
-        merge(work, up, "upstream main and fork main")
+        assisted = merge(work, up, "upstream main and fork main", probe)
         synced = git(work, "rev-parse", "HEAD")
         git(work, "switch", "--detach", base)
-        merge(work, seed, "the saved Mac changes")
-        merge(work, synced, "the Mac changes and synced fork")
+        assisted = merge(work, seed, "the saved Mac changes", probe) or assisted
+        assisted = merge(work, synced, "the Mac changes and synced fork", probe) or assisted
         source = git(work, "rev-parse", "HEAD")
         if probe:
             state("idle", "Fork main and upstream main " + up[:12] + " merge with this Mac's changes.")
             return None
-        if synced != fork:
+        if synced != fork and not assisted:
             # A concurrent push to main must survive. A normal push refuses a non-fast-forward.
             if git(work, "push", repo_url(FORK), synced + ":refs/heads/main", check=False):
                 raise Stop("failed", "Could not sync fork main. Check Git push access or retry with the new branch tip.")
@@ -207,7 +223,7 @@ def candidate(config, probe=False):
         git(work, "commit", "-m", "Release OpenBot for Mac " + version, "-m", "Fork-Source: " + source)
         tx = {"commit": git(work, "rev-parse", "HEAD"), "source": source, "upstream": up,
               "version": version, "batch": batch.name, "previous": tip, "seed": seed,
-              "forkMain": synced}
+              "forkMain": synced, "priorMain": fork if assisted else synced}
         save(ROOT / "pending.json", tx)
         keep = True
         return tx
@@ -293,6 +309,15 @@ def public_manifest(digest):
 def publish(tx, work, directory, digests):
     version = tx["version"]
     branch = "refs/heads/" + BRANCH
+    if tx.get("priorMain", tx["forkMain"]) != tx["forkMain"]:
+        current = remote_ref(FORK, "refs/heads/main")
+        if current == tx["priorMain"]:
+            git(work, "push", repo_url(FORK), tx["forkMain"] + ":refs/heads/main")
+        elif current != tx["forkMain"]:
+            # Resume a published transaction if main has since advanced and still contains the resolution.
+            git(work, "fetch", "--no-tags", repo_url(FORK), "refs/heads/main")
+            require(not git(work, "merge-base", "--is-ancestor", tx["forkMain"], "FETCH_HEAD", check=False),
+                    "Fork main changed before publication. Retry with its new changes.")
     previous = remote_ref(FORK, branch)
     require(previous in (tx["previous"], tx["commit"]), "The release branch changed before publication")
     if previous != tx["commit"]:
@@ -328,10 +353,11 @@ def publish(tx, work, directory, digests):
 def update(config, *, probe=False):
     state("syncing")
     tx = None if probe else read(ROOT / "pending.json")
-    if tx and not tx.get("digests"):
-        changed = (config["seed"] != tx["seed"] or remote_ref(UPSTREAM, "refs/heads/main") != tx["upstream"] or
-                   remote_ref(FORK, "refs/heads/main") != tx["forkMain"])
-        if changed and remote_ref(FORK, "refs/tags/" + tx["version"]) is None:
+    if tx:
+        stale_main = remote_ref(FORK, "refs/heads/main") not in (tx.get("priorMain"), tx["forkMain"])
+        changed = not tx.get("digests") and (config["seed"] != tx["seed"] or
+                  remote_ref(UPSTREAM, "refs/heads/main") != tx["upstream"])
+        if (stale_main or changed) and remote_ref(FORK, "refs/tags/" + tx["version"]) is None:
             os.replace(ROOT / "pending.json", ROOT / tx["batch"] / "superseded.json")
             tx = None
     if tx is None:

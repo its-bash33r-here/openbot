@@ -7,11 +7,14 @@ import { type UserInfo, userInfo } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { FORK_UPDATE_PHASES, forkUpdateInProgress } from "@openbot/contracts/ipc";
+import type { AppTranslate } from "@openbot/i18n";
+import { redactText } from "@openbot/logging";
 import { Effect, Schema } from "effect";
-import type { BrowserWindow, IpcMainInvokeEvent } from "electron";
+import type { BrowserWindow, Dialog, IpcMainInvokeEvent } from "electron";
 import { z } from "zod";
 import { causeHelpers } from "../backend/effect-boundary";
 import { isMissingFileError } from "../backend/file-errors";
+import { chooseForkMerge, forkMergeResponder } from "./fork-merge";
 import { readOwnedJson, verifyHostDirectory } from "./host-update-files";
 import type { IdleRestart } from "./idle-restart";
 
@@ -21,6 +24,7 @@ const INSTALL_CONFIG = z.object({
   path: z.array(z.string().refine(isAbsolute)).min(1),
 });
 const STATUS = z.object({ phase: z.enum(FORK_UPDATE_PHASES) });
+const FAILURE = z.object({ phase: z.enum(["held", "failed"]), reason: z.string().min(1).max(1200) });
 const QUIT = z
   .object({ pid: z.number().int(), nonce: z.string(), bundle: z.literal("/Applications/OpenBot.app") })
   .strict();
@@ -56,6 +60,9 @@ interface ForkUpdateOptions {
   mainWindow: () => BrowserWindow | null;
   enabled: () => boolean;
   idleRestart: Pick<IdleRestart, "requestForkQuit" | "endForkQuit">;
+  generateMergeText: (prompt: string) => Effect.Effect<string>;
+  translate: AppTranslate;
+  dialog: Dialog;
   childrenRunning: () => boolean;
   quit: () => void;
 }
@@ -163,22 +170,49 @@ export class ForkUpdate {
           env: {
             ...this.#env(owner.account),
             OPENBOT_FORK_UPDATE_RUN: run,
+            OPENBOT_FORK_UPDATE_MERGE: "1",
             OPENBOT_FORK_UPDATE_PID: String(process.pid),
             OPENBOT_FORK_UPDATE_NONCE: nonce,
           },
         });
         this.#child = child;
         const token = { pid: process.pid, nonce, bundle: "/Applications/OpenBot.app" };
+        const serveMerge = forkMergeResponder({
+          run,
+          nonce,
+          uid: owner.account.uid,
+          active: () => this.#child === child && this.#main(event) === win && !win.isDestroyed(),
+          generate: this.options.generateMergeText,
+          choose: (request, reason) =>
+            chooseForkMerge(win, this.options.dialog, this.options.translate, request, reason),
+        });
         const watch = setInterval(() => {
           if (this.#child !== child) return;
           Effect.runFork(this.#quitRequest(run, owner.account.uid, token, child));
+          Effect.runFork(serveMerge());
         }, 2000);
         watch.unref();
-        child.once("close", () => {
+        child.once("close", (code) => {
           clearInterval(watch);
           if (this.#child === child) {
             this.#child = null;
             this.options.idleRestart.endForkQuit();
+            if (code && this.#main(event) === win) {
+              Effect.runFork(
+                readOwnedJson(join(owner.folder, "status.json"), owner.account.uid, FAILURE).pipe(
+                  Effect.flatMap((failure) =>
+                    io(() =>
+                      this.options.dialog.showMessageBox(win, {
+                        type: "warning",
+                        message: this.options.translate("update.fork.stopped"),
+                        detail: redactText(failure.reason),
+                      }),
+                    ),
+                  ),
+                  Effect.ignore,
+                ),
+              );
+            }
           }
         });
         yield* io(() => once(child, "spawn"));

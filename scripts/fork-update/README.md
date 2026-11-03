@@ -36,11 +36,16 @@ status. Use `--status` for a read-only phase query.
 
 ## Conflicts and retries
 
-If Git finds overlapping edits it cannot merge, the runner lists the affected paths in the
-private `status.json`. Both branches and the installed app stay at their previous revisions.
-For an upstream conflict, resolve the reported files in the fork. For a conflict with a local
-Mac change, resolve it in the configured Mac source and run `configure.py` on the new commit.
-Click **Update this Mac** again after the fix. Discarding fork commits is unnecessary.
+For an overlap in ordinary source or documentation, OpenBot can use its selected model to combine
+the two edits. Only the conflicting section goes to the provider. This uses the owner's normal model
+quota. The model has no tools. The runner checks the proposed lines and keeps the surrounding file.
+The no-push probe never calls a model.
+
+When the model cannot preserve both edits, the owner chooses between the two versions in an OpenBot
+window or pauses the update. Sensitive files and structural conflicts go directly to this window.
+A choice for an entire file is labeled. The temporary Git checkout holds the result until the
+candidate passes CI, signing and copied-profile checks. The updater then advances fork main.
+The first update from 0.59.1 needs a clean Git merge to install the in-app merge assistant.
 
 This Mac release can include commits before upstream tags a release. It can include WhatsApp
 changes before upstream publishes a review or phone test and client features before the
@@ -48,7 +53,7 @@ live Signal service supports them. The normal CI, signing, package and copied-pr
 still run. A failed build or check stops publication and installation.
 
 Retry to resume an interrupted release. New upstream or fork commits supersede an unsealed
-candidate. Once the runner records the signed artifact hashes, it retries that exact build.
+candidate. A retry reuses the signed files if the fork still contains the expected source.
 
 ## Rehearse without publishing
 

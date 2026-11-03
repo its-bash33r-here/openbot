@@ -100,6 +100,12 @@ The account service also sends an event when it makes a new account (with the ap
 and when it saves the first website visit of an account. A payment event and a revenue event include
 that first visit when the account has one.
 
+On a Mac configured to release its owner's fork, clicking **Update this Mac** can send a small
+conflicting section of source code, its Git path, and the two branch roles to the selected AI
+provider. The request contains the shared base and both edits. OpenBot checks the text for known
+secrets before sending it. Sensitive paths and whole-file choices stay in the local decision
+window. The provider receives no update commands or signing credentials.
+
 ## AI conversation context
 
 When a provider session is replaced, OpenBot sends a bounded excerpt of the current conversation

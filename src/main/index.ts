@@ -814,6 +814,12 @@ function registerIpcHandlers({
       requestedUpdate,
       idleRestart,
       forkUpdate: new ForkUpdate({
+        dialog,
+        translate: language.translate,
+        generateMergeText: (prompt) =>
+          service
+            .generateWorkflowText({ provider: null, model: null, effort: null, prompt })
+            .pipe(Effect.orElseSucceed(() => "")),
         mainWindow: () => windowHolder.current,
         enabled: () =>
           app.isPackaged &&

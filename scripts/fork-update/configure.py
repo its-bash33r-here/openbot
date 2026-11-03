@@ -13,7 +13,7 @@ import tempfile
 SCRIPTS = Path(__file__).resolve().parent
 SOURCE = SCRIPTS.parents[1]
 ROOT = Path.home() / "Library/Application Support/OpenBot Fork Updates"
-FILES = ("update.py", "package_macos.py", "install_macos.py", "verify_copy.py", "probe-copy.mjs")
+FILES = ("update.py", "merge_assist.py", "package_macos.py", "install_macos.py", "verify_copy.py", "probe-copy.mjs")
 
 
 def write(name, data, mode=0o600):
