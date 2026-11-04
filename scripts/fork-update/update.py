@@ -483,7 +483,8 @@ def publish(tx, work, directory, digests):
     require(all(digests.get(k) == v for k, v in present.items()), "An uploaded asset differs from the signed files")
     for name in digests.keys() - present.keys():
         require(record["isDraft"], "An existing public release is incomplete")
-        gh("release", "upload", version, str(directory / name), "-R", FORK)
+        # Signed ZIPs and disk images can take longer than a metadata request on a slow uplink.
+        command("gh", "release", "upload", version, str(directory / name), "-R", FORK, timeout=7200)
     require({a["name"]: a["digest"] for a in info()["assets"]} == digests, "Uploaded release hashes differ")
     if record["isDraft"]:
         gh("release", "edit", version, "-R", FORK, "--draft=false", "--latest")
