@@ -106,6 +106,13 @@ provider. The request contains the shared base and both edits. OpenBot checks th
 secrets before sending it. Sensitive paths and whole-file choices stay in the local decision
 window. The provider receives no update commands or signing credentials.
 
+If a fork release upload fails and the signed asset is still missing, the runner can ask Google
+Public DNS (`dns.google`) for an IPv4 address for `uploads.github.com`. The query contains the
+public hostname, the A record type and a fixed subnet hint (`8.8.8.0/24`). Google can see the
+connection’s source IP. The query contains no repository name, asset name, file or GitHub credential.
+The runner checks the address against GitHub’s public ranges at `api.github.com/meta` before
+sending the authenticated upload to `uploads.github.com` over HTTPS.
+
 ## AI conversation context
 
 When a provider session is replaced, OpenBot sends a bounded excerpt of the current conversation

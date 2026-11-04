@@ -60,6 +60,17 @@ still run. A failed build or check stops publication and installation.
 Retry to resume an interrupted release. New upstream or fork commits supersede an unsealed
 candidate. A retry reuses the signed files if the fork still contains the expected source.
 
+If a normal GitHub CLI asset upload fails or times out, the runner checks the same fork release ID,
+tag, asset name and signed SHA-256. A matching upload can continue even if its response was lost.
+For a missing asset it tries one other IPv4 address in the same click. It checks a public DNS answer
+against GitHub's published web ranges and excludes the Mac's normal addresses. Only the public DNS
+query goes to Google. HTTPS still verifies uploads.github.com. Each upload has a two-hour limit.
+The runner reads the draft’s dedicated asset list because the release summary can hide failed uploads.
+Before deleting a starter, it fetches the individual asset by ID and checks its name, state, missing
+digest, and size. The reported size must be zero or exactly the signed file’s local size.
+If the route fails or an asset conflicts, the update stops before publication and installation.
+Keep the sealed files and draft for the existing Retry action.
+
 ## Rehearse without publishing
 
 Run `python3 scripts/fork-update/release-e2e.py` for a real Git rehearsal with local substitutes for

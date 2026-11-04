@@ -1,4 +1,5 @@
 """Exercise the release runner with real local Git remotes and disposable external-service fixtures."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -28,14 +29,32 @@ a=sys.argv[1:]
 p=pathlib.Path(db)
 d=json.loads(p.read_text())
 def flush(): p.write_text(json.dumps(d))
-def assets(): return [{"name":k,"digest":v} for k,v in d["assets"].items()]
+def assets():
+    return [{"name":k,"digest":v,"id":i+100,"state":"starter" if v is None else "uploaded",
+             "size":d.get("starterSizes",{}).get(k,0) if v is None else 10} for i,(k,v) in enumerate(d["assets"].items())]
+release_path = "repos/its-bash33r-here/openbot/releases"
+embedded = [row for row in assets() if row["state"] != "starter"]
+if a == ["api", release_path+"/41/assets?per_page=100"]:
+    print(json.dumps(assets())); sys.exit()
+if a[0]=="api" and a[1].startswith(release_path+"/assets/"):
+    row=next(r for r in assets() if a[1]==release_path+"/assets/"+str(r["id"]))
+    row.update(d.get("detailChange",{}))
+    d["inspected"]=row; flush(); print(json.dumps(row)); sys.exit()
+if a[:2]==["auth","token"]:
+    assert a==["auth","token","--hostname","github.com"]
+    print("fixture-credential"); sys.exit()
+if a[:3]==["api","--method","DELETE"]:
+    asset=next(row for row in assets() if a[3]=="repos/its-bash33r-here/openbot/releases/assets/"+str(row["id"]))
+    assert d["draft"] and asset["state"]=="starter" and d.pop("inspected",None)==asset
+    d.setdefault("deleted",[]).append(asset)
+    del d["assets"][asset["name"]]; flush(); sys.exit()
 if a[:2]==["api","--paginate"]:
     assert a[2]=="repos/its-bash33r-here/openbot/releases?per_page=100"
     print("remote-desktop-runtime-2026")
     if d.get("stable"): print(d["stable"])
 elif a[0]=="api":
-    assert a[1]=="repos/its-bash33r-here/openbot/releases/latest"
-    print(json.dumps({"draft":d["draft"],"prerelease":False,"tag_name":d["version"],"assets":assets()}))
+    assert a[1] in ("repos/its-bash33r-here/openbot/releases/latest","repos/its-bash33r-here/openbot/releases/41")
+    print(json.dumps({"id":41,"draft":d["draft"],"prerelease":False,"tag_name":d["version"],"assets":embedded}))
 elif a[:2]==["run","list"]:
     assert a[a.index("--branch")+1]=="fork/mac-release"
     sha=a[a.index("--commit")+1]
@@ -52,12 +71,20 @@ elif a[:2]==["run","view"]:
 elif a[:2]==["run","rerun"]: d["ci"]="success"; flush()
 elif a[:2]==["release","view"]:
     if not d["release"]: sys.exit(1)
-    print(json.dumps({"isDraft":d["draft"],"isPrerelease":False,"assets":assets()}))
+    print(json.dumps({"databaseId":41,"tagName":d["version"],"isDraft":d["draft"],"isPrerelease":False,"assets":embedded}))
 elif a[:2]==["release","create"]:
     assert not d["release"] and "--draft" in a
     d.update(release=True,version=a[2]); flush()
 elif a[:2]==["release","upload"]:
-    path=pathlib.Path(a[3]); assert path.name not in d["assets"]
+    path=pathlib.Path(a[3]); assert d["draft"] and "--clobber" not in a
+    if path.name in d["assets"]: sys.exit(1)
+    mode=d.get("faults",{}).pop(path.name,None)
+    if mode:
+        if mode=="starter": d["assets"][path.name]=None
+        if mode=="public": d["draft"]=False
+        if mode=="conflict": d["assets"][path.name]="sha256:other"
+        if mode=="lost": d["assets"][path.name]="sha256:"+hashlib.sha256(path.read_bytes()).hexdigest()
+        flush(); sys.exit(1)
     if len(d["assets"])==2 and d["interrupt"]: d["interrupt"]=False; flush(); sys.exit(1)
     d["assets"][path.name]="sha256:"+hashlib.sha256(path.read_bytes()).hexdigest(); flush()
 elif a[:2]==["release","edit"]:
@@ -79,6 +106,44 @@ if "patch" in sys.argv:
     script(u.ROOT / "install_macos.py", "import pathlib,sys\np=pathlib.Path(__file__).with_name('installs'); "
            "failed=p.with_name('fail-install');\nif '--prepare' not in sys.argv and failed.exists(): sys.exit(1)\n"
            "p.open('a').write(('prepare' if '--prepare' in sys.argv else 'install')+'\\n')")
+
+
+def hidden_zip_starter(folder, sealed, batch):
+    # Real 0.60.3 metadata shape. A sparse file keeps the rehearsal small on disk.
+    db = folder / "github.json"
+    original = u.read(db)
+    release = folder / "hidden-starter"
+    release.mkdir()
+    name = u.ASSETS[0].format(v=sealed["version"])
+    size = 324597882
+    with (release / name).open("w+b") as file:
+        file.truncate(size)
+        digest = "sha256:" + hashlib.file_digest(file, "sha256").hexdigest()
+    digests = {**sealed["digests"], name: digest}
+    def rehearse():
+        u.publish(sealed, batch / "source", release, digests)
+    try:
+        record = u.read(db)
+        record.update(draft=True, starterSizes={name:size}, deleted=[])
+        record["assets"][name] = None
+        for change in ({"id":999}, {"state":"uploaded"}, {"name":"wrong.zip"},
+                       {"size":size-1}, {"digest":"sha256:other"}):
+            u.save(db, {**record, "detailChange":change})
+            try:
+                rehearse()
+            except u.Stop as exc:
+                assert "changed before deletion" in str(exc)
+            else:
+                raise AssertionError("Changed starter accepted")
+            assert u.read(db)["deleted"] == [] and u.read(db)["draft"]
+        u.save(db, record)
+        rehearse()
+        result = u.read(db)
+        removed, = result["deleted"]
+        assert removed["name"] == name and removed["size"] == size and removed["digest"] is None
+        assert result["assets"][name] == digest and not result["draft"]
+    finally:
+        u.save(db, original)
 
 
 def assisted_release(folder, bun):
@@ -250,6 +315,46 @@ def main():
             raise AssertionError("The release runner contacted an external clearance service")
         u.urllib.request.urlopen = unexpected_health_check
 
+        # Exercise the actual resolver selection and upload request, offline.
+        host = u.upload_route.HOST
+        address = "140.82.114.13"
+        fallback_calls = []
+        fallback_mode = "fail"
+        u.upload_route.normal_addresses = lambda: {"140.82.113.13"}
+        def fake_curl(*args, timeout, headers=None):
+            url = args[-1]
+            if url.startswith("https://dns.google/"):
+                assert headers is None and url == ("https://dns.google/resolve?name=uploads.github.com"
+                                                   "&type=A&edns_client_subnet=8.8.8.0/24")
+                data = {"Status":0, "Answer":[{"name":host, "type":1, "data":ip}
+                                              for ip in ("8.8.8.8", "140.82.113.13", address)]}
+            elif url == "https://api.github.com/meta":
+                assert headers is None
+                data = {"web":["140.82.112.0/20"]}
+            else:
+                path = Path(args[args.index("--upload-file")+1])
+                assert url == f"https://{host}/repos/{u.FORK}/releases/41/assets?name={path.name}"
+                assert args[args.index("--resolve")+1] == f"{host}:443:{address}"
+                assert headers == b"Authorization: Bearer fixture-credential\n" and "fixture-credential" not in str(args)
+                db = folder / "github.json"
+                service = u.read(db)
+                assert service["draft"] and path.name not in service["assets"]
+                fallback_calls.append(path.name)
+                if fallback_mode == "fail":
+                    return subprocess.CompletedProcess(args, 28, b"")
+                with path.open("rb") as file:
+                    digest = "sha256:" + hashlib.file_digest(file, "sha256").hexdigest()
+                service["assets"][path.name] = digest
+                u.save(db, service)
+                if path.name.endswith(".dmg.blockmap"):
+                    return subprocess.CompletedProcess(args, 52, b"")
+                if fallback_mode == "truncated":
+                    return subprocess.CompletedProcess(args, 0, b'{"name":\n201')
+                receipt = {"name":path.name, "state":"uploaded", "digest":digest}
+                return subprocess.CompletedProcess(args, 0, json.dumps(receipt).encode()+b"\n201")
+            return subprocess.CompletedProcess(args, 0, json.dumps(data).encode())
+        u.upload_route.curl = fake_curl
+
         u.git(src, "switch", "--detach", "v1.0.0")
         (src / "fork-only").write_text("preserve the fork")
         u.git(src, "add", ".")
@@ -309,8 +414,47 @@ def main():
         assert "install" not in (u.ROOT/"installs").read_text()
         assert u.remote_ref(u.FORK, release_ref) == tx["commit"]
         only_two_branches()
+        assert len(fallback_calls) == 1
+        db = folder / "github.json"
+        service = u.read(db)
+        missing = [p.format(v=tx["version"]) for p in u.ASSETS if p.format(v=tx["version"]) not in service["assets"]]
+        service["faults"] = {missing[0]:"conflict"}
+        u.save(db, service)
+        expect("failed")
+        service = u.read(db)
+        assert service["draft"] and service["assets"][missing[0]] == "sha256:other" and len(fallback_calls) == 1
+        assert "install" not in (u.ROOT/"installs").read_text()
+        # Publication by another owner during the CLI attempt must prevent all recovery writes.
+        del service["assets"][missing[0]]
+        service["faults"] = {missing[0]:"public"}
+        u.save(db, service)
+        sealed = u.read(u.ROOT / "pending.json")
+        batch = u.ROOT / sealed["batch"]
+        try:
+            u.publish(sealed, batch / "source", batch / "release", sealed["digests"])
+        except u.Stop as exc:
+            assert "no longer a draft" in str(exc)
+        else:
+            raise AssertionError("Public release accepted for upload recovery")
+        service = u.read(db)
+        assert not service["draft"] and missing[0] not in service["assets"] and len(fallback_calls) == 1
+        service["draft"] = True
+        # Restore only fixture data, then exercise both lost responses and a verified 201.
+        service["faults"] = dict(zip(missing, ["starter","fail","lost","fail"]))
+        u.save(db, service)
+        fallback_mode = "success"
+        command = u.command
+        def lose_primary_response(*args, **kwargs):
+            result = command(*args, **kwargs)
+            if args[:3] == ("gh", "release", "upload") and Path(args[4]).name == missing[2] and result:
+                raise subprocess.TimeoutExpired(args[:3], 7200)
+            return result
+        u.command = lose_primary_response
         (u.ROOT / "fail-install").touch()
         expect("failed")  # Publication succeeded, but the Mac installation failed.
+        u.command = command
+        assert fallback_calls[1:] == [missing[0], missing[1], missing[3]]
+        hidden_zip_starter(folder, sealed, batch)
         assert not u.read(folder / "github.json")["draft"]
         assert u.remote_ref(u.FORK, release_ref) == tx["commit"]
         only_two_branches()
@@ -321,7 +465,7 @@ def main():
         assert u.remote_ref(u.FORK, "refs/heads/main") == synced
         assert u.read(u.ROOT/"status.json")["phase"]=="complete" and not u.read(folder/"github.json")["draft"]
         assert tx["commit"]==u.remote_ref(u.FORK,"refs/tags/1.0.1")==u.remote_ref(u.FORK,"refs/heads/"+u.BRANCH)
-        assert (u.ROOT/"installs").read_text().splitlines()==["prepare","prepare","prepare","install"]
+        assert (u.ROOT/"installs").read_text().splitlines()==["prepare","prepare","prepare","prepare","install"]
         u.update(cfg)
         assert u.read(u.ROOT/"status.json")["phase"]=="upToDate"
         # Advance fork main and verify that release history fast-forwards on a second signed version.
@@ -370,7 +514,18 @@ def main():
         u.git(src, "commit", "-m", "new source for a later release")
         u.git(src, "push", str(upstream), "HEAD:main")
         u.git(origin, "config", "receive.denyDeletes", "true")
+        # One update must publish and install even when the primary fails and the alternate reply is truncated.
+        disk_image = f"OpenBot-{rebuilt['version']}-arm64.dmg"
+        service = u.read(db)
+        service["faults"] = {disk_image: "fail"}
+        u.save(db, service)
+        fallback_mode = "truncated"
+        previous_calls = len(fallback_calls)
+        previous_installs = (u.ROOT / "installs").read_text().splitlines()
         u.update(cfg)
+        assert fallback_calls[previous_calls:] == [disk_image]
+        assert not u.read(db)["draft"] and not (u.ROOT / "pending.json").exists()
+        assert (u.ROOT / "installs").read_text().splitlines() == previous_installs + ["prepare", "install"]
         second = u.read(u.ROOT / "completed.json")
         assert u.read(u.ROOT / "status.json")["phase"] == "complete"
         assert second["commit"] == rebuilt["commit"] and second["upstream"] == next_upstream
@@ -431,8 +586,8 @@ def main():
         u.save(out,{"realGit":True,"services":"local fixtures","cases":["two permanent branches", "public tag stays fixed during staging", "same SHA retry", "moved staging head blocks CI and publication", "unrelated runtime release ignored",
                "superseded failed first build fast-forwards", "sealed legacy candidate rebuilt with its input revisions",
                "old branch protected by permanent history before deletion", "denied legacy cleanup retried on click",
-               "moved and unrelated branches retained", "no-push probe","untagged upstream main synced to fork main","CI failure","partial upload",
-               "resume same commit","install after published checksums","up to date","second release preserves both fork changes","merge conflict","fork and upstream conflict preserves branches","no WhatsApp or Signal clearance","manual release branch change preserved",
+               "moved and unrelated branches retained", "no-push probe","untagged upstream main synced to fork main","CI failure","both upload routes fail safely","conflicting digest retained","public release blocks recovery","zero-size starter recovery","hidden full-size ZIP starter","individual starter changed before delete","lost primary and alternate receipts","same-run alternate upload",
+               "one update publishes and installs after fallback with truncated receipt","resume same commit","install after published checksums","up to date","second release preserves both fork changes","merge conflict","fork and upstream conflict preserves branches","no WhatsApp or Signal clearance","manual release branch change preserved",
                "app model combines two edits", "ambiguous and invalid model replies use owner window",
                "failed checks retain public main", "retry retains approved resolution", "owner chooses file for delete/edit conflict", "wrong click nonce refused", "credential-like hunk stays local", "independent word edits combine on one line"]})
     print(out)
