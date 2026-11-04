@@ -175,7 +175,15 @@ def candidate(config, probe=False):
     keep = False
     try:
         # Reproduce GitHub's Update branch on the fork. Release-only changes stay on the Mac branch.
-        assisted = merge(work, up, "upstream main and fork main", probe)
+        # The pinned owner source can already contain a reviewed merge of these exact two heads.
+        # Keep its resolution private until the final candidate passes CI and copied-profile checks.
+        merges = git(work, "rev-list", "--merges", "--parents", seed, "--not", fork, up).splitlines()
+        reviewed = next((row.split()[0] for row in merges if row.split()[1:] == [fork, up]), None)
+        if reviewed:
+            git(work, "merge", "--ff-only", reviewed)
+            assisted = True
+        else:
+            assisted = merge(work, up, "upstream main and fork main", probe)
         synced = git(work, "rev-parse", "HEAD")
         git(work, "switch", "--detach", base)
         assisted = merge(work, seed, "the saved Mac changes", probe) or assisted

@@ -181,6 +181,19 @@ def assisted_release(folder, bun):
         assert u.git(u.ROOT / updated["batch"] / "source", "show", "HEAD:guide.md") == "new upstream guide"
         assert events.read_text().splitlines()[-1] == "window guide.md"
         assert events.read_text().splitlines().count("model") == 3
+        # The old app can bootstrap when its pinned source already carries this precise reviewed merge.
+        fork_tip = u.remote_ref(u.FORK, "refs/heads/main")
+        candidate_cache = u.ROOT / "cache.git"
+        u.git(src, "fetch", str(candidate_cache), updated["forkMain"])
+        checked_cfg = {"seed": updated["forkMain"], "source": str(src)}
+        os.environ.pop("OPENBOT_FORK_UPDATE_MERGE")
+        u.candidate(checked_cfg, probe=True)
+        assert u.read(u.ROOT / "status.json")["phase"] == "idle"
+        assert u.remote_ref(u.FORK, "refs/heads/main") == fork_tip
+        replay = u.candidate(checked_cfg)
+        assert replay["priorMain"] == fork_tip and replay["forkMain"] == updated["forkMain"]
+        assert events.read_text().splitlines().count("model") == 3
+
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, previous_handler)
