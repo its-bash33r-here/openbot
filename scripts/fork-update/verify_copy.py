@@ -201,6 +201,7 @@ def rehearse(bundle, backup, *, mock_keychain=False):
                 env = {"HOME": str(home), "CFFIXED_USER_HOME": str(home), "TMPDIR": str(test / "tmp") + "/",
                        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "en_US.UTF-8", "ZDOTDIR": str(home),
                        "OPENBOT_AUTH_API_URL": f"http://127.0.0.1:{port}"}
+                starts = []
                 for _ in range(2):
                     server.saw_session = False
                     args = ["/usr/bin/sandbox-exec", "-f", policy, bundle / "Contents/MacOS/OpenBot",
@@ -212,9 +213,15 @@ def rehearse(bundle, backup, *, mock_keychain=False):
                     child = subprocess.Popen(args, env=env, stdout=subprocess.DEVNULL,
                                              stderr=None if mock_keychain else subprocess.DEVNULL)
                     try:
-                        subprocess.run([bun, Path(__file__).with_name("probe-copy.mjs"), str(child.pid),
-                                        test / "profile", "signed_in" if signed_in else "signed_out"], check=True,
-                                       timeout=100, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        first_load = subprocess.run([bun, Path(__file__).with_name("probe-copy.mjs"), str(child.pid),
+                                        test / "profile", "signed_in" if signed_in else "signed_out"],
+                                       timeout=100, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                        observed = json.loads(first_load.stdout or b"{}")
+                        if first_load.returncode:
+                            step = observed.get("waitingFor", "window")
+                            require(step in ("window", "session", "workspace", "navigation", "probe"), "Invalid QA result.")
+                            raise RuntimeError("Copied-profile startup did not pass the first-load check: " + step)
+                        starts.append(observed)
                         child.wait(timeout=45)
                         require(child.returncode == 0 and server.saw_session == signed_in,
                                 "Copied-profile session QA failed.")
@@ -227,4 +234,4 @@ def rehearse(bundle, backup, *, mock_keychain=False):
                     counts["workspaceFiles"] = check_workspaces(backup / "Workspaces", home / "OpenBot")
             finally:
                 server.shutdown()
-    return {"launches": 2, "storedSession": signed_in, "preserved": counts}
+    return {"launches": len(starts), "firstLoads": starts, "storedSession": signed_in, "preserved": counts}

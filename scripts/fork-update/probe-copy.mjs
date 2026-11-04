@@ -8,11 +8,16 @@ const [pid, profile, expected] = process.argv.slice(2);
 const probe = `(async () => {
   const app = window.openbot;
   const state = await app.auth.getState();
+  if (state.status !== ${JSON.stringify(expected)}) return "session";
+  if (performance.getEntriesByType("navigation")[0]?.type !== "navigate") return "navigation";
+  const workspaceVisible = document.querySelector(".app-window")?.checkVisibility() === true
+    && !document.querySelector("main.app-loading")?.checkVisibility();
+  if (state.status === "signed_in" && (await app.getSetupState()).completed && !workspaceVisible) return "workspace";
   const agents = await app.agent.listAgents();
   if (agents.length) await app.agent.readConversationPage({
     agentId: agents[0].id, anchor: {type: "latest"}, limit: 1
   });
-  return state.status;
+  return { status: state.status, workspaceVisible, navigation: "navigate" };
 })()`;
 
 async function send(url, method, params) {
@@ -32,8 +37,10 @@ async function send(url, method, params) {
   }
 }
 
-const deadline = Date.now() + 85_000;
+const started = Date.now();
+const deadline = started + 85_000;
 let passed = false;
+let waitingFor = "window";
 while (!passed && Date.now() < deadline) {
   try {
     process.kill(Number(pid), 0);
@@ -58,9 +65,19 @@ while (!passed && Date.now() < deadline) {
         awaitPromise: true,
         returnByValue: true,
       });
-      if (reply?.result?.value === expected) {
+      if (reply?.exceptionDetails) waitingFor = "probe";
+      const result = reply?.result?.value;
+      if (["session", "navigation", "workspace"].includes(result)) waitingFor = result;
+      if (result?.status === expected && result.navigation === "navigate") {
         const version = await (await fetch(`${base}/json/version`)).json();
         await send(version.webSocketDebuggerUrl, "Browser.close", {});
+        process.stdout.write(
+          JSON.stringify({
+            workspaceVisible: result.workspaceVisible,
+            navigation: result.navigation,
+            elapsedMs: Date.now() - started,
+          }),
+        );
         passed = true;
       }
     }
@@ -69,4 +86,5 @@ while (!passed && Date.now() < deadline) {
   }
   if (!passed) await delay(250);
 }
+if (!passed) process.stdout.write(JSON.stringify({ waitingFor }));
 process.exitCode = passed ? 0 : 1;

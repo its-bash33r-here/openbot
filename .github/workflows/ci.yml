@@ -179,6 +179,9 @@ jobs:
       - name: Run the browser smoke test
         run: xvfb-run -a bun run test:browser
 
+      - name: Check first-load account delivery in Electron
+        run: xvfb-run -a bun scripts/renderer-startup-state-e2e.ts
+
       - name: Check the owner update gesture in an isolated browser world
         run: bun scripts/fork-update-click-e2e.ts
 

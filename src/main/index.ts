@@ -129,7 +129,7 @@ import { MessageLinkRelay, openHttpLink } from "./message-link-relay";
 import { startMainLog } from "./provider-log";
 import { watchRemoteHostDirectory } from "./remote-server-host-directory";
 import { createRendererForwarders } from "./renderer-forwarders";
-import { sendToRenderer } from "./renderer-ipc";
+import { sendToRenderer, whenRendererCanReceive } from "./renderer-ipc";
 import { RoutineWake } from "./routine-wake";
 import { memberAuditName } from "./server-audit-store";
 import { takeServerModeEnvironment } from "./server-mode";
@@ -1597,11 +1597,16 @@ if (!hasSingleInstanceLock) {
       if (!desktopTest) reconcileDynamicIsland();
       await windows.loadRenderer(mainWindow);
       performance.mark("openbot:renderer-loaded");
-      // `sendToRenderer` dropped the server changes made while the window loaded: the host list and
-      // the connection of the selected server. The renderer can have read the list before them.
-      forwardServers(remoteServers.list());
+      // Replay current state after loading stops: the initial reads can precede changes whose
+      // events were dropped while loading. Do not hold up the rest of startup.
+      void whenRendererCanReceive(mainWindow)
+        .then(() => {
+          forwardServers(remoteServers.list());
+          sendToRenderer(mainWindow, IPC_ENDPOINTS.auth.event, built.centralAuth.getState());
+        })
+        .catch((error) => logger.error("Unable to send the startup state to the window:", toLogValue(error)));
       if (desktopTest) return;
-      // After the load: `sendToRenderer` drops events aimed at a window that is still loading.
+      // Changes from these connections reach the window through the replay or normal events.
       await Effect.runPromise(remoteServers.startEventConnections());
       screen.on("display-added", reconcileDynamicIsland);
       screen.on("display-removed", reconcileDynamicIsland);
