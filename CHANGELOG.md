@@ -6,6 +6,112 @@ All notable changes to OpenBot will be documented here. The project follows
 
 ## [Unreleased]
 
+## [0.60.2] - 2026-11-04
+
+### Changed
+
+- Update this Mac tests each candidate on the same Mac release branch. If an update stops, Settings shows the failed step and lets you retry.
+- Update the Mac app with the changes from upstream main at ceafe16c5708.
+
+### Fixed
+
+- The Usage panel now records the tokens and the cost of Grok agents. Before, it showed 0 tokens for Grok, and each Grok turn counted as a turn without usage. The cost is the cost that Grok CLI reports for each prompt.
+- On Windows, a channel lead can route messages again. Before, each message that the lead routed
+  failed with "Routing failed. Choose a member or try again." when Windows still held the temporary
+  folder of the routing turn. Side questions and new agent profiles use the same step.
+- A channel lead on Claude routes messages again when Claude signs in with a saved Anthropic API key and no claude.ai account. Before, the channel said that the lead could not route the message. Channel summaries, workflow steps, memory review and generated profiles on such a Claude setup work again too.
+
+## [0.60.1] - 2026-11-04
+
+### Added
+
+- On a configured Mac, the local owner can start a fork release from Settings → Updates, see its progress, and install it when OpenBot is idle.
+- A GitHub trigger of a workflow can watch more than one repository. An event from any of them starts a
+  run, and a GitHub output set to "Same as trigger" acts on the repository of that event. Workflows that
+  watch one repository do not change.
+- Devin is a new provider. OpenBot downloads the Devin CLI from More providers, and you sign in
+  with your Devin account in the browser. Devin agents use the models of your Devin plan.
+- Add lime and indigo to the agent colors. Agents that had lime show lime again, not green, and
+  agents that had indigo show indigo, not violet.
+- Agents can use more colors: sky blue, navy, pink, wine, brown, sand and gray. An agent keeps its
+  exact color, and a joined server or the web client shows it when the server has the new optional
+  `agent-colors-v1` capability. Older apps and servers show the nearest released color.
+- In a channel, `$` now lists the skills of the agents in that channel, as it does in a chat.
+- Agents can create and change channels from their own chats. An agent can set the name, title,
+  instructions, members and lead, archive or restore a channel, and give it a picture: an icon on a
+  colour or an image file.
+- You can give an agent the flat avatar style again. Open the avatar editor in Agent settings and select Flat next to Shape. The shape, eyes and color stay the same, and Plush changes it back. The iPhone app shows a flat avatar as a plush avatar.
+- Webhook routines accept Standard Webhooks requests, such as Composio, Svix, Clerk, and Resend send.
+  To use the signing secret that the sender made, select **Use the sender's secret** in the routine
+  editor or on the chat card. Filters can read the complete request, for example
+  `/metadata/trigger_slug` for a Composio trigger.
+- WhatsApp shows in Marketplace › Apps on a joined server. An owner or admin links the server's
+  WhatsApp number from their own computer or the browser client: the server makes the QR code or
+  pairing code, and your screen shows it. The server must also run this version.
+- You can delete a message in a chat. Right-click the message and select Delete. This works in agent
+  chats, side tasks and channels, on this computer and on servers that you joined. The message goes
+  from the chat, its history and search for everyone. The agent can still remember it. On a server,
+  members delete their own messages; admins, and members who can manage the agent, delete any
+  message.
+
+### Changed
+
+- Update this Mac syncs new upstream commits into the fork and builds them with your Mac changes. New upstream commits can reach the Mac before the next upstream release.
+- OpenBot can combine compatible merge edits with its selected AI model. When the edits need a decision, choose a version in OpenBot and continue the same update.
+- Each routine of an agent now runs in its own thread. A routine no longer waits for other routines or
+  for the agent's chat, and the chat does not wait for a routine. The answer of a run shows in the
+  routine's thread, and the chat shows the run with an "Open thread" link. A Test run opens the
+  routine's thread. Before, all routine runs waited in one queue in the agent's chat.
+- A routine run in its own thread still shows a notification, sends a phone notification and plays
+  the completion sound. The notification shows the answer and opens the routine's thread.
+- A routine run no longer uses Computer Use: only the agent's chat controls the screen, so a routine
+  and the chat never control it at the same time. A run that needs Computer Use says so.
+- An agent with no thread limit of its own now runs up to 4 threads at the same time. Before, the
+  default was 2.
+- The provider list in onboarding has at most three plan rows, also when you have many providers. The
+  others are in "More providers". A new computer now shows ChatGPT, Claude and Gemini.
+- In settings, the section title, or the path to an open page such as Providers › ChatGPT, is now in
+  the top row of the window, as on the other pages.
+- On an open settings page, such as Providers › ChatGPT, Back in the top row goes to the list of the
+  section before it goes to an earlier chat.
+- Agents ask for a password for a script or a local service, such as an IMAP or Proton Mail Bridge
+  password, with the secure key request. They do not ask for it in chat.
+- Update the Mac app with the changes from upstream main at acccbce543a5.
+
+### Fixed
+
+- Include the Baileys license with the desktop app’s WhatsApp connector.
+- The line under the search field of a workflow menu no longer shows in the focus colour each time the
+  menu opens.
+- A long label or repository name ends with "…" in its tag on a workflow card. Before, it went past the
+  edge of the card.
+- In the new agent setup, you can click every color. Before, the large avatar covered the colors in
+  the middle of the row, so a click there did nothing.
+- A channel assignment no longer shows as started while its agent's own chat starts a turn. Before, the assignment could be claimed in that moment and then stay "starting" with no turn until the chat turn ended. Now it stays queued until the agent is free.
+- Show the Vault and Roles pages of the server settings in Polish when the app language is Polish.
+  Before, these pages were in English.
+- In the agent avatar colors and the channel picture colors, a hovered color no longer covers the
+  ring of the selected color. Each color tile is now as wide as its column.
+- On a Mac with a server on this computer, an empty second OpenBot window no longer opens next to
+  the app.
+- Grok no longer shows a "Grok error" when Git is not installed, as on a Windows computer without Git. Grok continues without Git, so the message now goes only to the log.
+- An agent set to "Ask before switching" now continues its work on the first available backup model when a usage limit, such as the Claude 5-hour limit, stops it after it started to work. Before, the turn failed, and the agent did not ask or switch.
+- Show Settings › Agents in German, Spanish, French, Italian, Japanese, Polish, Brazilian Portuguese,
+  Russian and Turkish. Before, its title, descriptions and summaries were in English.
+- When a Kimi turn fails, the error now shows the reason that Kimi gives, such as a rate limit.
+  Before, it showed only "Internal error".
+- The felt plushes on the loading screen and in agent avatars no longer have a dark outline in the
+  light theme. The edge of the fur now has the colour of the plush.
+- On a Linux computer with a Wayland session, OpenBot now starts when no monitor is on, for example
+  after an automatic update. Before, it stopped with no window until a monitor came on. With no
+  monitor, OpenBot now starts on XWayland, and the next start uses Wayland again.
+- In a shared chat, a member who joined a server after it started now shows with their profile name. Before, their messages showed an account id until the server restarted.
+- The Dynamic Island uses much less processor time when nothing changes. Before, the greeting motion
+  and the logo blink made it draw on every screen refresh, all day. Now the greeting moves only while
+  the pointer is on the island, and the logo draws only while it blinks.
+- On a remote server, the thinking of an agent no longer shows as cut-off messages above your message
+  while a turn streams. It now stays in the thinking group of the turn.
+
 ## [0.60.0] - 2026-11-03
 
 ### Added
