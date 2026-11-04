@@ -15,8 +15,12 @@ The release includes the upstream commits, the fork commits and the local Mac ch
    public Mac feed, exchanges the app bundles and reopens OpenBot. Other installs on the fork feed
    can get the published package with the regular update checker.
 
+After a successful install, the updater deletes its temporary `fork/mac-ci/<commit>` branch if
+it still points to the tested commit. If GitHub is unavailable, the next Update click retries cleanup.
+A failed update keeps its branch for a retry.
+
 A second click after interruption resumes the saved commit. A changed file, failed check, inaccessible
-feed or signing error stops installation. The runner never force-pushes to the fork.
+feed or signing error stops installation. The runner advances the permanent branches with normal pushes.
 The owner can find the last phase and a short reason in the private `status.json`.
 Keep both the old bundle and its matching profile in **OpenBot Fork Update Recovery** after a schema change.
 

@@ -69,6 +69,7 @@ if "patch" in sys.argv:
            "    name=pattern.format(v=v); (p/name).write_text(name); checks.append(hashlib.sha256(name.encode()).hexdigest()+'  '+name)\n"
            "(p/'SHA256SUMS-macos.txt').write_text('\\n'.join(checks)+'\\n'); (p/'mac-arm64/OpenBot.app').mkdir(parents=True)\n")
     script(u.ROOT / "install_macos.py", "import pathlib,sys\np=pathlib.Path(__file__).with_name('installs'); "
+           "failed=p.with_name('fail-install');\nif '--prepare' not in sys.argv and failed.exists(): sys.exit(1)\n"
            "p.open('a').write(('prepare' if '--prepare' in sys.argv else 'install')+'\\n')")
 
 
@@ -267,6 +268,8 @@ def main():
             raise AssertionError("Expected " + phase)
         expect("failed")  # Hosted CI fails before signing or tagging.
         tx=u.read(u.ROOT/"pending.json")
+        ci_ref = "refs/heads/fork/mac-ci/" + tx["commit"]
+        assert u.remote_ref(u.FORK, ci_ref) == tx["commit"]
         synced = u.remote_ref(u.FORK, "refs/heads/main")
         assert u.git(origin, "show", "-s", "--format=%P", synced).split() == [fork_head, upstream_head]
         assert tx["forkMain"] == synced and tx["upstream"] == upstream_head
@@ -276,10 +279,18 @@ def main():
         expect("failed")  # Two assets reached the draft. The next click must finish that draft.
         assert len(u.read(folder/"github.json")["assets"])==2 and u.read(folder/"github.json")["draft"]
         assert "install" not in (u.ROOT/"installs").read_text()
+        assert u.remote_ref(u.FORK, ci_ref) == tx["commit"]
+        (u.ROOT / "fail-install").touch()
+        expect("failed")  # Publication succeeded, but the Mac installation failed.
+        assert not u.read(folder / "github.json")["draft"]
+        assert u.remote_ref(u.FORK, ci_ref) == tx["commit"]
+        (u.ROOT / "fail-install").unlink()
         u.update(cfg)
+        assert u.remote_ref(u.FORK, ci_ref) is None
+        assert u.remote_ref(u.FORK, "refs/heads/main") == synced
         assert u.read(u.ROOT/"status.json")["phase"]=="complete" and not u.read(folder/"github.json")["draft"]
         assert tx["commit"]==u.remote_ref(u.FORK,"refs/tags/1.0.1")==u.remote_ref(u.FORK,"refs/heads/"+u.BRANCH)
-        assert (u.ROOT/"installs").read_text().splitlines()==["prepare","prepare","install"]
+        assert (u.ROOT/"installs").read_text().splitlines()==["prepare","prepare","prepare","install"]
         u.update(cfg)
         assert u.read(u.ROOT/"status.json")["phase"]=="upToDate"
         # Advance fork main and verify that release history fast-forwards on a second signed version.
@@ -299,8 +310,26 @@ def main():
         service = u.read(folder / "github.json")
         service.update(assets={}, release=False, draft=True)
         u.save(folder / "github.json", service)
+        u.git(origin, "config", "receive.denyDeletes", "true")
         u.update(cfg)
         second = u.read(u.ROOT / "completed.json")
+        second_ref = "refs/heads/fork/mac-ci/" + second["commit"]
+        assert u.read(u.ROOT / "status.json")["phase"] == "complete"
+        assert second["ciCleanupPending"] == [second["commit"]]
+        u.git(origin, "config", "receive.denyDeletes", "false")
+        u.update(cfg, probe=True)
+        assert u.remote_ref(u.FORK, second_ref) == second["commit"]
+        u.update(cfg)
+        assert u.remote_ref(u.FORK, second_ref) is None
+        assert u.read(u.ROOT / "completed.json")["ciCleanupPending"] == []
+        # A legacy completed receipt may refer to a branch someone has since repurposed.
+        u.git(origin, "update-ref", second_ref, fork_head)
+        u.git(origin, "update-ref", "refs/heads/fork/mac-ci/" + fork_head, fork_head)
+        u.save(u.ROOT / "completed.json", {k: v for k, v in second.items() if k != "ciCleanupPending"})
+        u.update(cfg)
+        assert u.remote_ref(u.FORK, second_ref) == fork_head
+        assert u.remote_ref(u.FORK, "refs/heads/fork/mac-ci/" + fork_head) == fork_head
+        assert u.remote_ref(u.FORK, "refs/heads/" + u.BRANCH) == second["commit"]
         assert second["version"] == "1.0.2" and second["previous"] == tx["commit"]
         assert u.git(origin, "merge-base", "--is-ancestor", tx["commit"], second["commit"], check=False) == 0
         assert u.git(origin, "show", second["commit"] + ":file") == "fork"
@@ -338,7 +367,8 @@ def main():
         assert u.git(origin, "show", u.BRANCH + ":unmerged-code") == "keep this manual fix"
         assisted_release(folder, bun)
         out.parent.mkdir(parents=True,exist_ok=True)
-        u.save(out,{"realGit":True,"services":"local fixtures","cases":["no-push probe","untagged upstream main synced to fork main","CI failure","partial upload",
+        u.save(out,{"realGit":True,"services":"local fixtures","cases":["CI branch retained through failed install", "CI branch removed after install",
+               "denied cleanup retried on click", "moved and unrelated branches retained", "no-push probe","untagged upstream main synced to fork main","CI failure","partial upload",
                "resume same commit","install after published checksums","up to date","second release preserves both fork changes","merge conflict","fork and upstream conflict preserves branches","no WhatsApp or Signal clearance","manual release branch change preserved",
                "app model combines two edits", "ambiguous and invalid model replies use owner window",
                "failed checks retain public main", "retry retains approved resolution", "owner chooses file for delete/edit conflict", "wrong click nonce refused", "credential-like hunk stays local", "independent word edits combine on one line"]})

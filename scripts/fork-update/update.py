@@ -247,9 +247,33 @@ def persist(tx, **fields):
     save(ROOT / "pending.json", tx)
 
 
+def ci_branch_name(commit):
+    return "fork/mac-ci/" + checked(commit, SHA, "CI revision")
+
+
+def cleanup_completed_ci(receipt):
+    if not receipt:
+        return []
+    # Older receipts record the installed commit but have no cleanup field.
+    pending = receipt.get("ciCleanupPending", [receipt["commit"]])
+    remaining = []
+    for commit in pending:
+        ref = "refs/heads/" + ci_branch_name(commit)
+        try:
+            if remote_ref(FORK, ref) == commit:
+                # The lease also protects a branch moved between the lookup and the deletion.
+                git(ROOT / "cache.git", "push", "--force-with-lease=" + ref + ":" + commit,
+                    repo_url(FORK), ":" + ref, timeout=30)
+        except (Stop, OSError, subprocess.SubprocessError):
+            remaining.append(commit)
+    if receipt.get("ciCleanupPending") != remaining:
+        save(ROOT / "completed.json", {**receipt, "ciCleanupPending": remaining})
+    return remaining
+
+
 def hosted_checks(tx, work):
     commit = tx["commit"]
-    ci_branch = "fork/mac-ci/" + commit
+    ci_branch = ci_branch_name(commit)
     target = "refs/heads/" + ci_branch
     remote = remote_ref(FORK, target)
     if remote != commit:
@@ -360,6 +384,7 @@ def publish(tx, work, directory, digests):
 
 def update(config, *, probe=False):
     state("syncing")
+    outstanding = [] if probe else cleanup_completed_ci(read(ROOT / "completed.json"))
     tx = None if probe else read(ROOT / "pending.json")
     if tx:
         stale_main = remote_ref(FORK, "refs/heads/main") not in (tx.get("priorMain"), tx["forkMain"])
@@ -399,9 +424,11 @@ def update(config, *, probe=False):
         run = os.environ.get("OPENBOT_FORK_UPDATE_RUN")
         if run and (Path(run) / "quit-ack.json").is_file():
             command("/usr/bin/open", "-a", APP, check=False)
+    tx["ciCleanupPending"] = list(dict.fromkeys([*outstanding, tx["commit"]]))
     save(ROOT / "completed.json", tx)
     (ROOT / "pending.json").unlink()
     state("complete")
+    cleanup_completed_ci(tx)
     # Git history and release receipts remain. The installed app and recovery copy no longer
     # require another full checkout, dependency tree, and several large archives per release.
     if not git(ROOT / "cache.git", "worktree", "remove", "--force", work, check=False):
