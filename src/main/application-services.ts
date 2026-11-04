@@ -232,6 +232,7 @@ import { prepareToolRuntimeForTest } from "./ipc/mcp-server-handlers";
 import { LanguageService } from "./language-service";
 import { LinkAccountService } from "./link-account-service";
 import { LinkAccountStore } from "./link-account-store";
+import { ozonePlatformArguments } from "./linux-wayland-output";
 import { localRoutineFeedDocument } from "./local-routine-calendar";
 import { type LocalServerChildEnvironment, startLocalServerChild } from "./local-server-child";
 import { LOCAL_SERVERS_FILE } from "./local-servers/local-server-registry";
@@ -1925,11 +1926,8 @@ export async function createApplicationServices({
   });
   await runCauseEffect(modelVisibility.load());
   /** The answer an agent gave in one turn, for routine flows, routine results and local scripts. */
-  const turnAnswer = (agentId: string, turnId: string): string | null => {
-    const threadId = store.list().find((agent) => agent.id === agentId)?.threadId;
-    if (!threadId) return null;
-    return latestTurnAnswer(store.database.readTurnAssistantMessages(agentId, threadId, turnId), turnId)?.text ?? null;
-  };
+  const turnAnswer = (agentId: string, turnId: string): string | null =>
+    latestTurnAnswer(store.database.readTurnAssistantMessages(agentId, turnId), turnId)?.text ?? null;
   // Listens only while an agent allows local scripts; see `AutomationServer`.
   const automation = new AutomationServer({
     root: store.automationRoot,
@@ -3074,7 +3072,10 @@ export async function createApplicationServices({
           runtimeRoot: providerRuntimesRoot,
           cipher: safeStorageCipher("error.app.macSecureStorageUnavailable"),
           remoteServers,
-          command: { executable: process.execPath, args: app.isPackaged ? [] : [app.getAppPath()] },
+          command: {
+            executable: process.execPath,
+            args: [...(app.isPackaged ? [] : [app.getAppPath()]), ...ozonePlatformArguments()],
+          },
           trash: (path) => shell.trashItem(path),
           account: {
             accountId: () => {
@@ -3445,7 +3446,8 @@ export async function createApplicationServices({
     relaunch: () => {
       // A development build only quits: its supervisor stops the stack, and a relaunched Electron
       // would run outside it with no renderer server.
-      if (app.isPackaged) app.relaunch();
+      // The arguments of `process.argv`: after an XWayland start, they do not keep `--ozone-platform=x11`.
+      if (app.isPackaged) app.relaunch({ args: process.argv.slice(1) });
       app.quit();
     },
     log: (message) => logger.info(message),

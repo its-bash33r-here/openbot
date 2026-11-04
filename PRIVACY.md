@@ -1001,7 +1001,8 @@ Network traffic can also occur when:
   `Check for updates`. It asks `api.github.com` for Codex and Kimi, `registry.npmjs.org` for Claude,
   OpenCode and Cline, `x.ai/cli` for Grok, and `raw.githubusercontent.com/agentclientprotocol/registry` and
   `dl.google.com` (for the download size) for Gemini, and the same registry and
-  `downloads.cursor.com` (for the download size) for Cursor, and it reads a list of blocked
+  `downloads.cursor.com` (for the download size) for Cursor, `static.devin.ai` (the manifest, and the
+  download size) for Devin, and it reads a list of blocked
   versions from `raw.githubusercontent.com/nightly-labs/openbot`. These requests contain no account, agent,
   conversation or file data;
 - an agent shows a visual reply, an agent checks its page with `html_preview`, or a user opens an
@@ -1294,6 +1295,12 @@ restrict or block a number that it sees as automated.
 - **Given to the WhatsApp Orchestrator.** Every new WhatsApp request goes first to the orchestrator
   agent, which runs on its provider like any other agent and passes the work to a teammate with the
   facts it needs.
+- **Managed from another computer.** An owner or admin of a joined server can link and manage the
+  host's numbers from their own computer or the browser client. The host sends that client the QR code
+  or pairing code of a link, the numbers and their names, the allowed contacts and groups, the pairing
+  requests that wait, and the list of the number's groups, over the encrypted connection of the
+  server. The QR code holds the one-use secret of that link. The stored keys of the device do not
+  leave the host.
 - **Sent to WhatsApp.** The agents' answers and the files they attach, short status posts, reactions,
   and approval requests with the command, folder and reason the provider gave, redacted. On a number
   used only by OpenBot, a person whom the owner did not allow gets one message with a pairing code.
@@ -1493,6 +1500,19 @@ OpenBot sends the token only to Moonshot AI (`api.kimi.ai`, `api.kimi.com`, or `
 when you set it for the CLI), in the same usage request that the CLI's `/usage` command sends. The
 request contains no conversation, file, or model data. OpenBot does not store, log, or send the
 token or the usage to its maintainer.
+
+### Devin
+
+OpenBot downloads the Devin CLI from `static.devin.ai` when you select Download on the Devin row.
+OpenBot starts the CLI as a local process. Prompts, attachments, and tool results go to that
+process, and the CLI sends them to Cognition (`app.devin.ai` and `api.devin.ai`). Sign in opens
+Devin's sign-in page on `app.devin.ai` in your browser. The CLI keeps its login and session files
+in `~/.local/share/devin`, its settings in `~/.config/devin`, and its plans in `~/.devin`, or in the
+XDG folders that you set. OpenBot does not read, copy, or upload these files; it reads only the
+change time of `credentials.toml`, to see a sign-in. When it starts, the CLI reads feature flags and
+sends product analytics events to Cognition. OpenBot does not change these settings. Cognition's
+terms for Devin apply. Team members see the host's Devin agents when their app supports Devin.
+
 ### Hermes
 
 OpenBot does not download Hermes Agent. It starts the `hermes` that you installed, with `hermes acp`,
