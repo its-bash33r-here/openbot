@@ -17,6 +17,7 @@ import urllib.request
 # The installed owner command uses isolated Python. Load its pinned sibling only.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import merge_assist
+import upload_route
 from install_macos import STEP_EXIT
 
 ROOT = Path.home() / "Library/Application Support/OpenBot Fork Updates"
@@ -471,25 +472,85 @@ def publish(tx, work, directory, digests):
         git(work, "push", repo_url(FORK), tx["commit"] + ":" + ref)
     require(remote_ref(FORK, ref) == tx["commit"], "Release tag already names different code")
     # The authenticated CLI sees drafts. Only a confirmed absence permits creating a new draft.
-    def info():
-        return json.loads(gh("release", "view", version, "-R", FORK, "--json", "isDraft,isPrerelease,assets"))
     if command("gh", "release", "view", version, "-R", FORK, check=False):
         notes = directory.parent / "notes.md"
         notes.write_text("OpenBot " + version + " for Apple silicon.\n\nUpstream source commit: " + tx["upstream"] + ".\n")
         gh("release", "create", version, "-R", FORK, "--draft", "--verify-tag", "--title", "OpenBot " + version, "--notes-file", notes)
-    record = info()
-    require(not record["isPrerelease"], "Unexpected release channel")
-    present = {a["name"]: a["digest"] for a in record["assets"]}
-    require(all(digests.get(k) == v for k, v in present.items()), "An uploaded asset differs from the signed files")
-    for name in digests.keys() - present.keys():
-        require(record["isDraft"], "An existing public release is incomplete")
-        gh("release", "upload", version, str(directory / name), "-R", FORK)
-    require({a["name"]: a["digest"] for a in info()["assets"]} == digests, "Uploaded release hashes differ")
-    if record["isDraft"]:
+    identity = json.loads(gh("release", "view", version, "-R", FORK, "--json", "databaseId,tagName"))
+    release_id = identity["databaseId"]
+    require(type(release_id) is int and release_id > 0 and identity["tagName"] == version, "Unexpected release")
+    endpoint = f"repos/{FORK}/releases/{release_id}"
+
+    def is_starter(asset, name):
+        return (asset["name"] == name and asset["state"] == "starter" and asset["digest"] in (None, "")
+                and type(asset["id"]) is int and asset["id"] > 0 and type(asset["size"]) is int
+                and asset["size"] in (0, (directory / name).stat().st_size))
+
+    def snapshot(*, draft=False):
+        record = api(endpoint)
+        require(record["id"] == release_id and record["tag_name"] == version and not record["prerelease"],
+                "Release identity changed")
+        require(not draft or record["draft"] is True, "The release is no longer a draft")
+        present = {}
+        # The release object can omit failed uploads. A release with over 100 assets
+        # already exceeds our six allowed names, so the first page suffices to fail closed.
+        for asset in api(endpoint + "/assets?per_page=100"):
+            name = asset["name"]
+            require(name in digests and name not in present, "Unexpected release asset")
+            require((record["draft"] is True and is_starter(asset, name))
+                    or (asset["state"] == "uploaded" and asset["digest"] == digests[name]),
+                    "An uploaded asset differs from the signed files")
+            present[name] = asset
+        return record["draft"], present
+
+    def pending(name):
+        require(remote_ref(FORK, ref) == tx["commit"], "The release tag moved during upload")
+        return snapshot(draft=True)[1].get(name)
+
+    for name, digest in digests.items():
+        draft, present = snapshot()
+        asset = present.get(name)
+        if asset and asset["state"] == "uploaded":
+            continue
+        require(draft is True, "An existing public release is incomplete")
+        path = directory / name
+        try:
+            if not command("gh", "release", "upload", version, str(path), "-R", FORK, timeout=7200, check=False):
+                continue
+        except subprocess.TimeoutExpired:
+            pass
+        asset = pending(name)
+        if asset and asset["state"] == "uploaded":
+            continue
+        address = upload_route.alternate_address()
+        token = gh("auth", "token", "--hostname", "github.com")
+        fresh = pending(name)
+        if fresh and fresh["state"] == "uploaded":
+            continue
+        if fresh:
+            require(asset and fresh["id"] == asset["id"], "The failed upload placeholder changed")
+            asset_endpoint = f"repos/{FORK}/releases/assets/{fresh['id']}"
+            detail = api(asset_endpoint)
+            require(detail["id"] == fresh["id"] and is_starter(detail, name),
+                    "The failed upload placeholder changed before deletion")
+            gh("api", "--method", "DELETE", asset_endpoint)
+            require(pending(name) is None, "Upload target changed after placeholder removal")
+        receipt = upload_route.upload(FORK, release_id, path, address, token)
+        if receipt is not None:
+            require(receipt["name"] == name and receipt["state"] == "uploaded" and receipt["digest"] == digest,
+                    "Alternate upload receipt differs from the signed file")
+        verified = pending(name)
+        require(verified and verified["state"] == "uploaded", "Alternate upload could not be verified")
+    draft, present = snapshot()
+    require(set(present) == set(digests) and all(a["state"] == "uploaded" for a in present.values()),
+            "Uploaded release hashes differ")
+    if draft:
+        require(remote_ref(FORK, ref) == tx["commit"], "The release tag moved before publication")
         gh("release", "edit", version, "-R", FORK, "--draft=false", "--latest")
     public = api("repos/" + FORK + "/releases/latest")
-    require(public["tag_name"] == version and not public["draft"] and not public["prerelease"] and
-            {a["name"]: a["digest"] for a in public["assets"]} == digests, "The stable feed does not match the signed release")
+    public_draft, public_assets = snapshot()
+    require(public["id"] == release_id and public["tag_name"] == version and not public["draft"] and not public["prerelease"] and
+            not public_draft and public_assets.keys() == digests.keys(), "The stable feed does not match the signed release")
     public_manifest(digests["latest-mac.yml"])
 
 
