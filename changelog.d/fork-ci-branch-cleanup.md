@@ -1,3 +1,3 @@
 ### Changed
 
-- Update this Mac now removes its temporary GitHub CI branch after a successful installation.
+- Update this Mac tests each candidate on the same Mac release branch. If an update stops, Settings shows the failed step and lets you retry.

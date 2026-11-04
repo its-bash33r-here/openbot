@@ -1,4 +1,4 @@
-import { type ForkUpdatePhase, forkUpdateInProgress } from "@openbot/contracts/ipc";
+import { type ForkUpdatePhase, forkUpdateInProgress, isForkUpdateRetryPhase } from "@openbot/contracts/ipc";
 import type { AppTextKey } from "@openbot/i18n";
 import { Button, Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@openbot/ui";
 import { useText } from "@openbot/ui/text";
@@ -17,6 +17,16 @@ const PHASE_TEXT = {
   conflict: "update.fork.conflict",
   held: "update.fork.held",
   failed: "update.fork.failed",
+  "failed.sync": "update.fork.failed.sync",
+  "failed.checks": "update.fork.failed.checks",
+  "failed.sign": "update.fork.failed.sign",
+  "failed.quit": "update.fork.failed.quit",
+  "failed.quitHelperTimeout": "update.fork.failed.quitHelperTimeout",
+  "failed.backup": "update.fork.failed.backup",
+  "failed.verifyCopy": "update.fork.failed.verifyCopy",
+  "failed.publish": "update.fork.failed.publish",
+  "failed.install": "update.fork.failed.install",
+  "failed.launch": "update.fork.failed.launch",
 } as const satisfies Record<ForkUpdatePhase, AppTextKey>;
 
 export function createForkUpdateSettings(visible: () => boolean) {
@@ -58,7 +68,10 @@ export function createForkUpdateSettings(visible: () => boolean) {
     void settingsPort()
       .update.startFork()
       .then(
-        (next) => receive(next, request),
+        (next) => {
+          if (next === null && request === generation) read(request);
+          else receive(next, request);
+        },
         () => receive("failed", request),
       );
   }
@@ -80,7 +93,7 @@ export function createForkUpdateSettings(visible: () => boolean) {
             disabled={forkUpdateInProgress(phase() ?? "idle")}
             onClick={start}
           >
-            {t("update.fork.start")}
+            {t(isForkUpdateRetryPhase(phase()) ? "common.retry" : "update.fork.start")}
           </Button>
         </ItemActions>
       </Item>
