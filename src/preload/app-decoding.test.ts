@@ -409,6 +409,8 @@ describe("pending Marketplace listing", () => {
 describe("fork update status", () => {
   it("admits only known phases and the unavailable state", () => {
     expect(decodeForkUpdatePhase("held")).toBe("held");
+    expect(decodeForkUpdatePhase("failed.quit")).toBe("failed.quit");
+    expect(() => decodeForkUpdatePhase("failed.private diagnostic")).toThrow();
     expect(decodeForkUpdatePhase(null)).toBeNull();
     expect(() => decodeForkUpdatePhase({ phase: "failed", detail: "private" })).toThrow();
     expect(() => decodeForkUpdatePhase("shell output")).toThrow();

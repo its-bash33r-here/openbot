@@ -1,4 +1,5 @@
 """Run one owner-initiated fork release. No network access in --status."""
+import ctypes
 import fcntl
 import hashlib
 import json
@@ -16,6 +17,7 @@ import urllib.request
 # The installed owner command uses isolated Python. Load its pinned sibling only.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import merge_assist
+from install_macos import STEP_EXIT
 
 ROOT = Path.home() / "Library/Application Support/OpenBot Fork Updates"
 FORK = "its-bash33r-here/openbot"
@@ -30,10 +32,40 @@ ASSETS = ("OpenBot-{v}-arm64.zip", "OpenBot-{v}-arm64.dmg", "OpenBot-{v}-arm64.z
 QUIT_ENV = ("OPENBOT_FORK_UPDATE_RUN", "OPENBOT_FORK_UPDATE_PID", "OPENBOT_FORK_UPDATE_NONCE")
 
 
+# These keys also identify the step in the local Settings catalog. Never send child output to the renderer.
+PHASE_STEP = {"syncing": "sync", "checking": "checks", "signing": "sign", "publishing": "publish",
+              "installing": "install"}
+STEP_REASON = {
+    "sync": "The fork and upstream source could not be synchronized. Check access and retry.",
+    "checks": "GitHub checks could not finish successfully. Retry the update.",
+    "sign": "OpenBot could not build or verify its signed Mac package. Check signing access and retry.",
+    "quit": "OpenBot could not finish the idle quit. Let running work finish and retry.",
+    "quitHelperTimeout": "OpenBot quit, but a background process did not close in time. Retry the update.",
+    "backup": "OpenBot could not verify the recovery copy. Check free disk space and retry.",
+    "verifyCopy": "The upgraded copy of the profile failed verification. Retry the update.",
+    "publish": "OpenBot could not verify publication to the fork. Check GitHub access and retry.",
+    "install": "OpenBot could not install the verified package. Retry the update.",
+    "launch": "The installed app did not confirm startup. Keep the recovery copy and retry.",
+}
+
+
+def release_crash_reporter():
+    # Crashpad sets these task exception ports; detached children inherit them on macOS. Clearing only
+    # our own handlers before spawning any children lets the old app's reporter exit on its own.
+    lib = ctypes.CDLL(None)
+    task = ctypes.c_uint.in_dll(lib, "mach_task_self_").value
+    mask = (1 << 10) | (1 << 11)  # EXC_CRASH | EXC_RESOURCE
+    if int(os.uname().release.split(".", 1)[0]) < 22:
+        mask |= 1 << 12  # Crashpad also sets EXC_GUARD before macOS 13.
+    if lib.task_set_exception_ports(task, mask, 0, 1, 0) != 0:  # MACH_PORT_NULL, EXCEPTION_DEFAULT
+        raise Stop("failed", STEP_REASON["quit"], "quit")
+
+
 class Stop(Exception):
-    def __init__(self, phase, reason):
+    def __init__(self, phase, reason, failed_step=None):
         super().__init__(reason)
         self.phase = phase
+        self.failed_step = failed_step
 
 
 def save(path, value):
@@ -51,8 +83,18 @@ def read(path, default=None):
         return default
 
 
-def state(phase, reason=""):
-    save(ROOT / "status.json", {"phase": phase, "reason": reason})
+def state(phase, reason="", *, failed_step=None):
+    record = {"phase": phase, "reason": reason}
+    if failed_step:
+        record["failedStep"] = failed_step
+    save(ROOT / "status.json", record)
+
+
+def failed(error, phase="failed", step=None):
+    current = read(ROOT / "status.json", {}).get("phase")
+    step = step or PHASE_STEP.get(current, "sync")
+    reason = str(error) if isinstance(error, Stop) and not str(error).startswith("Command failed:") else STEP_REASON[step]
+    state(phase, reason, failed_step=step)
 
 
 def require(ok, message):
@@ -73,9 +115,18 @@ def command(*args, cwd=None, timeout=600, check=True, local=False):
         env.update({k: os.environ[k] for k in QUIT_ENV if k in os.environ})
     # git and gh are bounded text queries. Stream larger build/check output straight to /dev/null.
     capture = args[0] in ("git", "gh")
-    p = subprocess.run(args, cwd=cwd, env=env, text=True, stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL, timeout=timeout)
+    installer_step = "backup" if "--prepare" in args else "install"
+    try:
+        p = subprocess.run(args, cwd=cwd, env=env, text=True, stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        if local:
+            raise Stop("failed", STEP_REASON[installer_step], installer_step) from error
+        raise
     if check:
+        if local and p.returncode:
+            step = next((name for name, code in STEP_EXIT.items() if code == p.returncode), installer_step)
+            raise Stop("failed", STEP_REASON[step], step)
         require(p.returncode == 0, "Command failed: " + Path(args[0]).name + (" " + args[1] if capture else ""))
     return (p.stdout or "").strip() if check else p.returncode
 
@@ -137,7 +188,20 @@ def merge(work, ref, label, probe):
     return True
 
 
-def candidate(config, probe=False):
+def published_commit():
+    # The fork also publishes runtime assets. Only stable numeric tags with a Mac update feed count.
+    names = gh("api", "--paginate", "repos/" + FORK + "/releases?per_page=100", "--jq",
+               '.[] | select(.draft == false and .prerelease == false and any(.assets[]?; .name == "latest-mac.yml")) | .tag_name')
+    versions = [name for name in names.splitlines() if re.fullmatch(VERSION, name)]
+    if not versions:
+        return None
+    tag = "refs/tags/" + max(versions, key=semver)
+    commit = remote_ref(FORK, tag)
+    require(commit, "The published release is missing its version tag.")
+    return commit
+
+
+def candidate(config, probe=False, *, replacing=None, pin_inputs=False):
     cache = ROOT / "cache.git"
     if not cache.exists():
         command("git", "init", "--bare", cache)
@@ -152,7 +216,20 @@ def candidate(config, probe=False):
         git(cache, "fetch", "--no-tags", url, "+" + ref + ":refs/input/" + dest)
     up = git(cache, "rev-parse", "refs/input/upstream^{commit}")
     fork = git(cache, "rev-parse", "refs/input/fork^{commit}")
-    tip = remote_ref(FORK, "refs/heads/" + BRANCH)
+    staging = remote_ref(FORK, "refs/heads/" + BRANCH)
+    tip = published_commit()
+    prior = replacing or read(ROOT / "pending.json") or {}
+    require(staging is not None or tip is None, "The Mac release branch is missing from published history.")
+    require(staging == tip or (prior and staging in (prior["commit"], prior.get("stageBase", prior["previous"]))),
+            "The Mac release branch contains changes outside this update. Review its history before retrying.")
+    if replacing:
+        require(replacing["previous"] == tip and remote_ref(FORK, "refs/tags/" + replacing["version"]) is None,
+                "The previous candidate was tagged or its published baseline changed. Resume its release instead.")
+        require(read(ROOT / "pending.json") == replacing, "The saved update changed during preparation.")
+    if pin_inputs:
+        require(replacing and fork in (replacing.get("priorMain"), replacing["forkMain"]),
+                "Fork main changed after this update was prepared.")
+        up, fork = replacing["upstream"], replacing["forkMain"]
     last = read(ROOT / "completed.json")
     if tip:
         git(cache, "fetch", "--no-tags", repo_url(FORK), tip)
@@ -185,7 +262,7 @@ def candidate(config, probe=False):
         else:
             assisted = merge(work, up, "upstream main and fork main", probe)
         synced = git(work, "rev-parse", "HEAD")
-        git(work, "switch", "--detach", base)
+        git(work, "switch", "--detach", replacing["source"] if pin_inputs else base)
         assisted = merge(work, seed, "the saved Mac changes", probe) or assisted
         assisted = merge(work, synced, "the Mac changes and synced fork", probe) or assisted
         source = git(work, "rev-parse", "HEAD")
@@ -196,15 +273,19 @@ def candidate(config, probe=False):
             # A concurrent push to main must survive. A normal push refuses a non-fast-forward.
             if git(work, "push", repo_url(FORK), synced + ":refs/heads/main", check=False):
                 raise Stop("failed", "Could not sync fork main. Check Git push access or retry with the new branch tip.")
-        if tip and last and tip == last["commit"] and base == source and installed() == last["version"]:
+        if not replacing and tip and last and tip == last["commit"] and base == source and installed() == last["version"]:
             state("upToDate")
             return None
         if tip and base == source:
             raise Stop("held", "An existing fork release needs recovery on this Mac.")
         state("checking")
         command("bun", "install", "--frozen-lockfile", cwd=work)
+        # Carry forward the Git history of an unpublished candidate without treating its version
+        # or generated changelog as published. The permanent branch can then fast-forward.
+        parent = replacing["commit"] if replacing else tip
+        if parent:
+            git(work, "merge", "--no-ff", "-s", "ours", "--no-edit", parent)
         if tip:
-            git(work, "merge", "--no-ff", "-s", "ours", "--no-edit", tip)
             history = git(work, "show", tip + ":CHANGELOG.md")
             changelog = work / "CHANGELOG.md"
             current = changelog.read_text()
@@ -231,7 +312,14 @@ def candidate(config, probe=False):
         git(work, "commit", "-m", "Release OpenBot for Mac " + version, "-m", "Fork-Source: " + source)
         tx = {"commit": git(work, "rev-parse", "HEAD"), "source": source, "upstream": up,
               "version": version, "batch": batch.name, "previous": tip, "seed": seed,
-              "forkMain": synced, "priorMain": fork if assisted else synced}
+              "stageBase": staging, "ciBranch": BRANCH, "ciCleanupPending": [], "forkMain": synced,
+              "priorMain": replacing.get("priorMain", fork) if pin_inputs else (fork if assisted else synced)}
+        if replacing:
+            if pin_inputs:
+                require(version == replacing["version"], "The rebuilt candidate no longer matches the pending version.")
+                tx["pinnedInputs"] = True
+            tx["ciCleanupPending"] = legacy_branches(replacing)
+            save(ROOT / checked(replacing["batch"], r"candidate-[\w-]+", "previous directory") / "superseded.json", replacing)
         save(ROOT / "pending.json", tx)
         keep = True
         return tx
@@ -247,23 +335,69 @@ def persist(tx, **fields):
     save(ROOT / "pending.json", tx)
 
 
+def legacy_branches(receipt):
+    return receipt.get("ciCleanupPending", [] if receipt.get("ciBranch") == BRANCH else [receipt["commit"]])
+
+
+def cleanup_legacy_ci(commits, anchor):
+    remaining = []
+    cache = ROOT / "cache.git"
+    for commit in commits:
+        ref = "refs/heads/fork/mac-ci/" + checked(commit, SHA, "old CI revision")
+        try:
+            if remote_ref(FORK, ref) == commit:
+                require(git(cache, "merge-base", "--is-ancestor", commit, anchor, check=False) == 0,
+                        "The old CI commit is not in the release history.")
+                git(cache, "push", "--force-with-lease=" + ref + ":" + commit, repo_url(FORK), ":" + ref, timeout=30)
+        except (Stop, OSError, subprocess.SubprocessError):
+            remaining.append(commit)
+    return remaining
+
+
+def cleanup_completed_ci(receipt):
+    if not receipt:
+        return []
+    pending = legacy_branches(receipt)
+    if not pending:
+        return []
+    # A completed receipt must still be anchored by its immutable public tag.
+    try:
+        tag = remote_ref(FORK, "refs/tags/" + checked(receipt["version"], VERSION, "completed version"))
+    except (Stop, OSError, subprocess.SubprocessError):
+        return pending
+    if tag != receipt["commit"]:
+        return pending
+    remaining = cleanup_legacy_ci(pending, tag)
+    if receipt.get("ciCleanupPending") != remaining:
+        save(ROOT / "completed.json", {**receipt, "ciCleanupPending": remaining})
+    return remaining
+
+
 def hosted_checks(tx, work):
-    commit = tx["commit"]
-    ci_branch = "fork/mac-ci/" + commit
-    target = "refs/heads/" + ci_branch
+    commit = checked(tx["commit"], SHA, "candidate revision")
+    target = "refs/heads/" + BRANCH
     remote = remote_ref(FORK, target)
     if remote != commit:
-        require(remote is None, "The candidate branch points to another commit.")
-        git(work, "push", repo_url(FORK), commit + ":" + target)
+        require(remote == tx.get("stageBase", tx["previous"]), "The Mac release branch changed before CI.")
+        require(remote is None or git(work, "merge-base", "--is-ancestor", remote, commit, check=False) == 0,
+                "The candidate would overwrite the Mac release branch.")
+        # Compare-and-swap includes a branch concurrently created, rewound, or deleted.
+        git(work, "push", "--force-with-lease=" + target + ":" + (remote or ""), repo_url(FORK), commit + ":" + target)
+    legacy = legacy_branches(tx)
+    remaining = cleanup_legacy_ci(legacy, commit)
+    if tx.get("ciBranch") != BRANCH or remaining != legacy:
+        persist(tx, ciBranch=BRANCH, ciCleanupPending=remaining)
     def runs():
-        return json.loads(gh("run", "list", "-R", FORK, "--workflow", "ci.yml", "--branch", ci_branch, "--commit",
+        return json.loads(gh("run", "list", "-R", FORK, "--workflow", "ci.yml", "--branch", BRANCH, "--commit",
                              commit, "--event", "workflow_dispatch", "--json", "databaseId,headSha,status,conclusion"))
     deadline = time.monotonic() + 7200
     if not runs():
-        gh("workflow", "run", "ci.yml", "-R", FORK, "--ref", ci_branch)
+        gh("workflow", "run", "ci.yml", "-R", FORK, "--ref", BRANCH)
     retry_attempt = None
     while time.monotonic() < deadline:
         found = [r for r in runs() if r["headSha"] == commit]
+        if not found:
+            require(remote_ref(FORK, target) == commit, "The Mac release branch moved before its CI run started.")
         if found:
             run = found[0]
             if run["status"] == "completed":
@@ -275,6 +409,7 @@ def hosted_checks(tx, work):
                                 "Signal E2E", "Team API and reverse actions E2E"}
                     require(result["headSha"] == commit and result["conclusion"] == "success" and required <= passed,
                             "Required CI jobs did not pass for this commit")
+                    require(remote_ref(FORK, target) == commit, "The Mac release branch moved during CI.")
                     return
                 if retry_attempt is not None:
                     attempt = int(gh("run", "view", str(run["databaseId"]), "-R", FORK, "--json", "attempt", "--jq", ".attempt"))
@@ -317,6 +452,9 @@ def public_manifest(digest):
 def publish(tx, work, directory, digests):
     version = tx["version"]
     branch = "refs/heads/" + BRANCH
+    require(published_commit() in (tx["previous"], tx["commit"]),
+            "A different stable Mac release was published before this update.")
+    require(remote_ref(FORK, branch) == tx["commit"], "The tested Mac release branch moved before publication.")
     if tx.get("priorMain", tx["forkMain"]) != tx["forkMain"]:
         current = remote_ref(FORK, "refs/heads/main")
         if current == tx["priorMain"]:
@@ -326,13 +464,10 @@ def publish(tx, work, directory, digests):
             git(work, "fetch", "--no-tags", repo_url(FORK), "refs/heads/main")
             require(not git(work, "merge-base", "--is-ancestor", tx["forkMain"], "FETCH_HEAD", check=False),
                     "Fork main changed before publication. Retry with its new changes.")
-    previous = remote_ref(FORK, branch)
-    require(previous in (tx["previous"], tx["commit"]), "The release branch changed before publication")
-    if previous != tx["commit"]:
-        git(work, "push", repo_url(FORK), tx["commit"] + ":" + branch)
     ref = "refs/tags/" + version
     tag = remote_ref(FORK, ref)
     if not tag:
+        require(remote_ref(FORK, branch) == tx["commit"], "The tested Mac release branch moved before tagging.")
         git(work, "push", repo_url(FORK), tx["commit"] + ":" + ref)
     require(remote_ref(FORK, ref) == tx["commit"], "Release tag already names different code")
     # The authenticated CLI sees drafts. Only a confirmed absence permits creating a new draft.
@@ -360,14 +495,20 @@ def publish(tx, work, directory, digests):
 
 def update(config, *, probe=False):
     state("syncing")
+    outstanding = [] if probe else cleanup_completed_ci(read(ROOT / "completed.json"))
     tx = None if probe else read(ROOT / "pending.json")
     if tx:
-        stale_main = remote_ref(FORK, "refs/heads/main") not in (tx.get("priorMain"), tx["forkMain"])
-        changed = not tx.get("digests") and (config["seed"] != tx["seed"] or
-                  remote_ref(UPSTREAM, "refs/heads/main") != tx["upstream"])
-        if (stale_main or changed) and remote_ref(FORK, "refs/tags/" + tx["version"]) is None:
-            os.replace(ROOT / "pending.json", ROOT / tx["batch"] / "superseded.json")
-            tx = None
+        current_main = remote_ref(FORK, "refs/heads/main")
+        stale_main = current_main not in (tx.get("priorMain"), tx["forkMain"])
+        if tx.get("pinnedInputs") or tx.get("digests"):
+            if stale_main:
+                cache = ROOT / "cache.git"
+                git(cache, "fetch", "--no-tags", repo_url(FORK), "refs/heads/main")
+                require(not git(cache, "merge-base", "--is-ancestor", tx["forkMain"], "FETCH_HEAD", check=False),
+                        "Fork main no longer contains this sealed or pinned update. Review the branch before retrying.")
+        elif stale_main or config["seed"] != tx["seed"] or remote_ref(UPSTREAM, "refs/heads/main") != tx["upstream"]:
+            if remote_ref(FORK, "refs/tags/" + tx["version"]) is None:
+                tx = candidate(config, replacing=tx)
     if tx is None:
         tx = candidate(config, probe)
     if tx is None:
@@ -389,6 +530,7 @@ def update(config, *, probe=False):
     app = output / "mac-arm64/OpenBot.app"
     installer = ROOT / "install_macos.py"
     try:
+        state("installing")
         command(sys.executable, installer, "--prepare", app, local=True, timeout=90000)
         state("publishing")
         publish(tx, work, output, digests)
@@ -399,9 +541,11 @@ def update(config, *, probe=False):
         run = os.environ.get("OPENBOT_FORK_UPDATE_RUN")
         if run and (Path(run) / "quit-ack.json").is_file():
             command("/usr/bin/open", "-a", APP, check=False)
+    tx["ciCleanupPending"] = list(dict.fromkeys([*outstanding, *legacy_branches(tx)]))
     save(ROOT / "completed.json", tx)
     (ROOT / "pending.json").unlink()
     state("complete")
+    cleanup_completed_ci(tx)
     # Git history and release receipts remain. The installed app and recovery copy no longer
     # require another full checkout, dependency tree, and several large archives per release.
     if not git(ROOT / "cache.git", "worktree", "remove", "--force", work, check=False):
@@ -417,8 +561,15 @@ def main():
         except BlockingIOError:
             busy = True
         if sys.argv[1:] == ["--status"]:
-            phase = read(ROOT / "status.json", {"phase": "idle"})["phase"]
-            print(json.dumps({"phase": "failed" if not busy and phase in ACTIVE else phase}))
+            record = read(ROOT / "status.json", {"phase": "idle"})
+            phase = record["phase"]
+            if not busy and phase in ACTIVE:
+                print(json.dumps({"phase": "failed", "failedStep": PHASE_STEP[phase]}))
+            else:
+                result = {"phase": phase}
+                if record.get("failedStep") in STEP_REASON:
+                    result["failedStep"] = record["failedStep"]
+                print(json.dumps(result))
             return 0
         if busy:
             return 0
@@ -426,12 +577,14 @@ def main():
             require(sys.argv[1:] in ([], ["--probe"]), "Unknown command")
             config = read(ROOT / "config.json")
             os.environ["PATH"] = os.pathsep.join(config["path"])
+            if not sys.argv[1:] and sys.platform == "darwin" and os.environ.get("OPENBOT_FORK_UPDATE_PID"):
+                release_crash_reporter()
             update(config, probe=bool(sys.argv[1:]))
         except Stop as exc:
-            state(exc.phase, str(exc))
+            failed(exc, exc.phase, exc.failed_step)
             return 1
         except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as error:
-            state("failed", "Could not finish the update: " + type(error).__name__)
+            failed(error)
             return 1
     return 0
 

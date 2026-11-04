@@ -1,6 +1,7 @@
 """Prepare a verified recovery copy before publishing, then install that same notarized app."""
 import argparse
 import ctypes
+from contextlib import contextmanager
 import fcntl
 import hashlib
 import json
@@ -28,6 +29,24 @@ DEV_ID = (f'identifier "{BUNDLE_ID}" and anchor apple generic and '
           f'certificate leaf[subject.OU] = "{TEAM}" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists')
 
 
+# Only the fixed exit code crosses into the owner runner. Child stderr may contain private paths and secrets.
+STEP_EXIT = {"sign": 40, "quit": 41, "backup": 42, "verifyCopy": 43, "install": 44, "launch": 45, "quitHelperTimeout": 46}
+
+
+class InstallFailure(Exception):
+    def __init__(self, step):
+        super().__init__(step)
+        self.step = step
+
+
+@contextmanager
+def checking(step):
+    try:
+        yield
+    except (OSError, RuntimeError, ValueError, sqlite3.Error, subprocess.SubprocessError) as error:
+        raise InstallFailure(step) from error
+
+
 def require(condition, message):
     if not condition:
         raise RuntimeError(message)
@@ -51,6 +70,7 @@ def private_dir(path):
             "The update directory must be private and owned by this user.")
 
 
+@checking("sign")
 def signing(app, candidate=False):
     require(app.is_dir() and not app.is_symlink(), "Expected an application bundle.")
     run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
@@ -90,10 +110,12 @@ def processes():
     return procs
 
 
+@checking("quit")
 def stopped():
     require(not processes(), "OpenBot is running. Wait for all work to finish and quit the installed app.")
 
 
+@checking("quit")
 def prepare_shutdown():
     active = processes()
     values = [os.environ.get("OPENBOT_FORK_UPDATE_" + n) for n in ("RUN", "PID", "NONCE")]
@@ -121,7 +143,9 @@ def prepare_shutdown():
             if not active:
                 return
             acknowledged = acknowledged or time.monotonic()
-            require(time.monotonic() - acknowledged < 90, "Another OpenBot process is still running after quit.")
+            if time.monotonic() - acknowledged >= 90:
+                step = "quit" if str(APP / "Contents/MacOS/OpenBot") in active.values() else "quitHelperTimeout"
+                raise InstallFailure(step)
         elif pid not in active:
             raise RuntimeError("OpenBot exited without confirming that work finished.")
         time.sleep(1)
@@ -184,6 +208,7 @@ def data_hashes(profile, workspaces):
     return {"profile": tree_digest(profile), "workspaces": tree_digest(workspaces)}
 
 
+@checking("backup")
 def snapshot(candidate, old, new, pointer):
     from verify_copy import rehearse
     folder = Path(tempfile.mkdtemp(dir=RECOVERY, prefix="recovery-"))
@@ -198,7 +223,8 @@ def snapshot(candidate, old, new, pointer):
             "The recovery copy differs from the installed data or app.")
     database_check(folder / "Profile", folder)
     stopped()
-    qa = rehearse(candidate, folder)
+    with checking("verifyCopy"):
+        qa = rehearse(candidate, folder)
     stopped()
     require(signing(candidate, True) == new and data_hashes(PROFILE, WORKSPACES) == remembered,
             "The package or live data changed during copied-profile QA.")
@@ -208,6 +234,7 @@ def snapshot(candidate, old, new, pointer):
     return record
 
 
+@checking("backup")
 def verify_record(record, old, new, live=True):
     require(record["old"] == old and record["new"] == new, "The prepared app changed.")
     name = record["directory"]
@@ -229,6 +256,7 @@ def exchange(current, staged):
         raise OSError(code, os.strerror(code))
 
 
+@checking("launch")
 def open_verified():
     trace = PROFILE / "logs/trace.ndjson"
     initial = trace.stat() if trace.is_file() else None
@@ -247,6 +275,7 @@ def open_verified():
     raise RuntimeError("Installed app did not confirm renderer startup. Keep the recovery copy.")
 
 
+@checking("install")
 def install(candidate, prepare_only):
     new = signing(candidate, True)
     old = signing(APP)
@@ -317,5 +346,7 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (OSError, RuntimeError, ValueError, sqlite3.Error, subprocess.SubprocessError) as error:
-        sys.exit(str(error))
+    except InstallFailure as error:
+        sys.exit(STEP_EXIT[error.step])
+    except (OSError, RuntimeError, ValueError, sqlite3.Error, subprocess.SubprocessError):
+        sys.exit(STEP_EXIT["backup" if "--prepare" in sys.argv else "install"])

@@ -6,9 +6,8 @@ import { lstat, mkdtemp } from "node:fs/promises";
 import { type UserInfo, userInfo } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
-import { FORK_UPDATE_PHASES, forkUpdateInProgress } from "@openbot/contracts/ipc";
+import { FORK_UPDATE_PHASES, forkUpdateInProgress, isForkUpdateRetryPhase } from "@openbot/contracts/ipc";
 import type { AppTranslate } from "@openbot/i18n";
-import { redactText } from "@openbot/logging";
 import { Effect, Schema } from "effect";
 import type { BrowserWindow, Dialog, IpcMainInvokeEvent } from "electron";
 import { z } from "zod";
@@ -23,8 +22,16 @@ const INSTALL_CONFIG = z.object({
   seed: z.string().regex(/^[0-9a-f]{40}$/),
   path: z.array(z.string().refine(isAbsolute)).min(1),
 });
-const STATUS = z.object({ phase: z.enum(FORK_UPDATE_PHASES) });
-const FAILURE = z.object({ phase: z.enum(["held", "failed"]), reason: z.string().min(1).max(1200) });
+// Only allowlisted failure stages cross into the renderer or native dialog. Older runners saved no stage.
+export const forkUpdateReport = z
+  .object({
+    phase: z.enum(FORK_UPDATE_PHASES),
+    failedStep: z.string().optional().catch(undefined),
+  })
+  .transform(({ phase, failedStep }) => {
+    const failure = `failed.${failedStep}`;
+    return { phase: (phase === "failed" || phase === "held") && isForkUpdateRetryPhase(failure) ? failure : phase };
+  });
 const QUIT = z
   .object({ pid: z.number().int(), nonce: z.string(), bundle: z.literal("/Applications/OpenBot.app") })
   .strict();
@@ -116,7 +123,7 @@ export class ForkUpdate {
       yield* io(() =>
         win.webContents.executeJavaScriptInIsolatedWorld(WORLD, [{ code: ARM_FORK_UPDATE_CLICK }], false),
       );
-      const state = yield* readOwnedJson(join(owner.folder, "status.json"), owner.account.uid, STATUS).pipe(
+      const state = yield* readOwnedJson(join(owner.folder, "status.json"), owner.account.uid, forkUpdateReport).pipe(
         Effect.catch((error) =>
           Effect.succeed({ phase: isMissingFileError(error.cause) ? ("idle" as const) : ("failed" as const) }),
         ),
@@ -132,7 +139,7 @@ export class ForkUpdate {
             cwd: owner.folder,
           }),
         );
-        return (yield* Effect.try(() => STATUS.parse(JSON.parse(result.stdout)))).phase;
+        return (yield* Effect.try(() => forkUpdateReport.parse(JSON.parse(result.stdout)))).phase;
       }
       return state.phase;
     },
@@ -153,7 +160,7 @@ export class ForkUpdate {
       const win = this.#main(event);
       if (!win?.isFocused() || this.#starting || this.#child) return null;
       this.#starting = true;
-      try {
+      return yield* Effect.gen({ self: this }, function* () {
         const allowed = yield* io(() =>
           win.webContents.executeJavaScriptInIsolatedWorld(WORLD, [{ code: CONSUME_FORK_UPDATE_CLICK }], false),
         );
@@ -199,16 +206,18 @@ export class ForkUpdate {
             this.options.idleRestart.endForkQuit();
             if (code && this.#main(event) === win) {
               Effect.runFork(
-                readOwnedJson(join(owner.folder, "status.json"), owner.account.uid, FAILURE).pipe(
-                  Effect.flatMap((failure) =>
-                    io(() =>
+                readOwnedJson(join(owner.folder, "status.json"), owner.account.uid, forkUpdateReport).pipe(
+                  Effect.flatMap(({ phase }) => {
+                    if (!isForkUpdateRetryPhase(phase)) return Effect.void;
+                    const detail = this.options.translate(`update.fork.${phase}`);
+                    return io(() =>
                       this.options.dialog.showMessageBox(win, {
                         type: "warning",
                         message: this.options.translate("update.fork.stopped"),
-                        detail: redactText(failure.reason),
+                        detail,
                       }),
-                    ),
-                  ),
+                    );
+                  }),
                   Effect.ignore,
                 ),
               );
@@ -218,9 +227,13 @@ export class ForkUpdate {
         yield* io(() => once(child, "spawn"));
         child.unref();
         return "syncing" as const;
-      } finally {
-        this.#starting = false;
-      }
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            this.#starting = false;
+          }),
+        ),
+      );
     },
     Effect.catch(() => Effect.succeed("failed" as const)),
   );

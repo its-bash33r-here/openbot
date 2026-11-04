@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>OpenBot update settings fixture</title></head>
+  <body>
+    <main data-tab="updates" class="settings-modal"></main>
+    <script type="module">
+      import "@openbot/brand/tokens.css";
+      import "@openbot/ui/styles.css";
+      import "@openbot/ui/features/settings/settings-modal.css";
+      import { DEFAULT_GENERAL_SETTINGS } from "@openbot/ui/features/settings/app-settings";
+      import { SettingsUpdatesTab } from "@openbot/ui/features/settings/SettingsUpdatesTab";
+      import { createSettingsUpdatesStore } from "@openbot/ui/features/settings/stores/updates-store";
+      import { render } from "@solidjs/web";
+      import { createForkUpdateSettings } from "../../src/renderer/src/features/settings/fork-update-settings.tsx";
+
+      window.openbot = { update: { getForkPhase: window.fixtureReadPhase, startFork: window.fixtureStart } };
+      render(() => {
+        const fork = createForkUpdateSettings(() => true);
+        return SettingsUpdatesTab({
+          store: createSettingsUpdatesStore({ updateStatus: { phase: "idle" } }),
+          value: DEFAULT_GENERAL_SETTINGS,
+          get hasForkUpdate() { return fork.available(); },
+          get forkUpdateRow() { return fork.Row(); },
+        });
+      }, document.querySelector("main"));
+    </script>
+    <style>
+      body { background: var(--openbot-bg-canvas); color: var(--openbot-text); font-family: system-ui, sans-serif; }
+      main.settings-modal { display: block; width: min(760px, 90vw); height: auto; padding: 16px; }
+    </style>
+  </body>
+</html>

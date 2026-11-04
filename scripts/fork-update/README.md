@@ -6,18 +6,23 @@ It merges upstream into the fork in a private checkout and checks that the resul
 the saved Mac changes. A clean merge advances the fork's `main` with a normal push.
 The release includes the upstream commits, the fork commits and the local Mac changes.
 
-1. **Check.** The runner pushes a candidate branch and requests hosted CI on that exact commit.
+1. **Check.** The runner pushes the candidate to the permanent `fork/mac-release` branch and requests hosted CI on that exact commit.
 2. **Build.** On success the Mac builds, signs, notarizes, and verifies the app, update ZIP, DMG and
    manifest. Signing uses the team's Developer ID in the login Keychain and the signed-in Xcode account.
 3. **Install.** OpenBot waits for work to finish and quits. The runner backs up the old app, profile and
-   workspaces and rehearses the upgrade on copies. It updates `fork/mac-release`, creates a numeric
+   workspaces and rehearses the upgrade on copies. It checks that the tested candidate still owns
+   `fork/mac-release`, creates a numeric
    Git tag, checks every draft asset against its local SHA-256, publishes the release, checks the
    public Mac feed, exchanges the app bundles and reopens OpenBot. Other installs on the fork feed
    can get the published package with the regular update checker.
 
-A second click after interruption resumes the saved commit. A changed file, failed check, inaccessible
-feed or signing error stops installation. The runner never force-pushes to the fork.
-The owner can find the last phase and a short reason in the private `status.json`.
+The fork keeps two branches. `main` holds synced source. `fork/mac-release` holds the Mac candidate
+being tested and can move before the update is ready to install. The published version tag and
+GitHub Release identify the downloadable build. A failed check leaves the previous release available.
+
+After an interruption, open **Settings → Updates** to see which step stopped. Select **Retry** to resume. A changed file, failed check, inaccessible
+feed or signing error stops installation. The runner advances the permanent branches with normal pushes.
+Older updater records can lack the failed step. OpenBot shows when those details are unavailable.
 Keep both the old bundle and its matching profile in **OpenBot Fork Update Recovery** after a schema change.
 
 ## One-time owner setup

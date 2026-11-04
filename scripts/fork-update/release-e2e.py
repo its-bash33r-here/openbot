@@ -23,19 +23,27 @@ def fixture_services(directory):
     db = directory / "github.json"
     u.save(db, {"ci": "missing", "assets": {}, "release": False, "draft": True, "interrupt": True})
     script(directory / "gh", "#!" + sys.executable + "\n" + "db=" + repr(str(db)) + "\n" + """
-import hashlib, json, pathlib, sys
+import hashlib, json, pathlib, sys, subprocess
 a=sys.argv[1:]
 p=pathlib.Path(db)
 d=json.loads(p.read_text())
 def flush(): p.write_text(json.dumps(d))
 def assets(): return [{"name":k,"digest":v} for k,v in d["assets"].items()]
-if a[0]=="api":
+if a[:2]==["api","--paginate"]:
+    assert a[2]=="repos/its-bash33r-here/openbot/releases?per_page=100"
+    print("remote-desktop-runtime-2026")
+    if d.get("stable"): print(d["stable"])
+elif a[0]=="api":
     assert a[1]=="repos/its-bash33r-here/openbot/releases/latest"
     print(json.dumps({"draft":d["draft"],"prerelease":False,"tag_name":d["version"],"assets":assets()}))
 elif a[:2]==["run","list"]:
-    sha=a[a.index("--commit")+1]; d["checked"]=sha; flush()
-    print(json.dumps([] if d["ci"]=="missing" else [{"headSha":sha,"databaseId":12,"status":"completed","conclusion":d["ci"]}]))
-elif a[:2]==["workflow","run"]: d["ci"]="failure"; flush()
+    assert a[a.index("--branch")+1]=="fork/mac-release"
+    sha=a[a.index("--commit")+1]
+    print(json.dumps([] if d.get("checked")!=sha else [{"headSha":sha,"databaseId":12,"status":"completed","conclusion":d["ci"]}]))
+elif a[:2]==["workflow","run"]:
+    assert a[a.index("--ref")+1]=="fork/mac-release"
+    d["checked"]=subprocess.check_output(["git","-C",str(p.parent/"fork.git"),"rev-parse","refs/heads/fork/mac-release"],text=True).strip()
+    d["ci"]="failure" if d["ci"]=="missing" else "success"; flush()
 elif a[:2]==["run","view"]:
     if a[-1]==".attempt": print(1)
     else:
@@ -54,7 +62,7 @@ elif a[:2]==["release","upload"]:
     d["assets"][path.name]="sha256:"+hashlib.sha256(path.read_bytes()).hexdigest(); flush()
 elif a[:2]==["release","edit"]:
     assert len(d["assets"])==6 and d["draft"]
-    d["draft"]=False; flush()
+    d["draft"]=False; d["stable"]=d["version"]; flush()
 else: raise ValueError(a)
 """, True)
     script(directory / "bun", "#!" + sys.executable + """
@@ -69,6 +77,7 @@ if "patch" in sys.argv:
            "    name=pattern.format(v=v); (p/name).write_text(name); checks.append(hashlib.sha256(name.encode()).hexdigest()+'  '+name)\n"
            "(p/'SHA256SUMS-macos.txt').write_text('\\n'.join(checks)+'\\n'); (p/'mac-arm64/OpenBot.app').mkdir(parents=True)\n")
     script(u.ROOT / "install_macos.py", "import pathlib,sys\np=pathlib.Path(__file__).with_name('installs'); "
+           "failed=p.with_name('fail-install');\nif '--prepare' not in sys.argv and failed.exists(): sys.exit(1)\n"
            "p.open('a').write(('prepare' if '--prepare' in sys.argv else 'install')+'\\n')")
 
 
@@ -267,19 +276,52 @@ def main():
             raise AssertionError("Expected " + phase)
         expect("failed")  # Hosted CI fails before signing or tagging.
         tx=u.read(u.ROOT/"pending.json")
+        release_ref = "refs/heads/" + u.BRANCH
+        def only_two_branches():
+            assert set(u.git(origin, "for-each-ref", "--format=%(refname)", "refs/heads").splitlines()) == {
+                "refs/heads/main", release_ref}
+        assert u.remote_ref(u.FORK, release_ref) == tx["commit"]
+        only_two_branches()
         synced = u.remote_ref(u.FORK, "refs/heads/main")
         assert u.git(origin, "show", "-s", "--format=%P", synced).split() == [fork_head, upstream_head]
         assert tx["forkMain"] == synced and tx["upstream"] == upstream_head
         assert u.git(origin, "show", tx["commit"] + ":remote/api/new-protocol") == "untagged upstream change"
         assert u.git(origin, "show", tx["commit"] + ":fork-only") == "preserve the fork"
         assert not (u.ROOT/tx["batch"]/"release").exists() and not u.remote_ref(u.FORK,"refs/tags/1.0.1")
+        # A concurrent owner change to the permanent branch cannot be overwritten or tagged.
+        u.git(origin, "update-ref", release_ref, fork_head, tx["commit"])
+        expect("failed")
+        try:
+            u.publish(tx, u.ROOT / tx["batch"] / "source", folder, {})
+        except u.Stop as exc:
+            assert "moved before publication" in str(exc)
+        else:
+            raise AssertionError("A displaced candidate was published")
+        assert u.remote_ref(u.FORK, release_ref) == fork_head and not u.remote_ref(u.FORK, "refs/tags/1.0.1")
+        u.git(origin, "update-ref", release_ref, tx["commit"], fork_head)
+        # Supersede a staged, failed first candidate. There is still no public version tag.
+        first_attempt = tx["commit"]
+        tx = u.candidate(cfg, replacing=tx)
+        assert tx["stageBase"] == first_attempt and tx["previous"] is None and tx["version"] == "1.0.1"
+        assert u.remote_ref(u.FORK, release_ref) == first_attempt
         expect("failed")  # Two assets reached the draft. The next click must finish that draft.
         assert len(u.read(folder/"github.json")["assets"])==2 and u.read(folder/"github.json")["draft"]
         assert "install" not in (u.ROOT/"installs").read_text()
+        assert u.remote_ref(u.FORK, release_ref) == tx["commit"]
+        only_two_branches()
+        (u.ROOT / "fail-install").touch()
+        expect("failed")  # Publication succeeded, but the Mac installation failed.
+        assert not u.read(folder / "github.json")["draft"]
+        assert u.remote_ref(u.FORK, release_ref) == tx["commit"]
+        only_two_branches()
+        (u.ROOT / "fail-install").unlink()
         u.update(cfg)
+        assert u.remote_ref(u.FORK, release_ref) == tx["commit"]
+        only_two_branches()
+        assert u.remote_ref(u.FORK, "refs/heads/main") == synced
         assert u.read(u.ROOT/"status.json")["phase"]=="complete" and not u.read(folder/"github.json")["draft"]
         assert tx["commit"]==u.remote_ref(u.FORK,"refs/tags/1.0.1")==u.remote_ref(u.FORK,"refs/heads/"+u.BRANCH)
-        assert (u.ROOT/"installs").read_text().splitlines()==["prepare","prepare","install"]
+        assert (u.ROOT/"installs").read_text().splitlines()==["prepare","prepare","prepare","install"]
         u.update(cfg)
         assert u.read(u.ROOT/"status.json")["phase"]=="upToDate"
         # Advance fork main and verify that release history fast-forwards on a second signed version.
@@ -299,8 +341,56 @@ def main():
         service = u.read(folder / "github.json")
         service.update(assets={}, release=False, draft=True)
         u.save(folder / "github.json", service)
+        # Simulate a sealed, unpublished candidate from the old updater and a changed desktop seed.
+        old = u.candidate(cfg)
+        work = u.ROOT / old["batch"] / "source"
+        legacy_ref = "refs/heads/fork/mac-ci/" + old["commit"]
+        u.git(work, "push", str(origin), old["commit"] + ":" + legacy_ref)
+        for key in ("ciBranch", "stageBase", "ciCleanupPending"):
+            old.pop(key)
+        old["digests"] = {"old-package": "sealed"}
+        u.save(u.ROOT / "pending.json", old)
+        u.git(src, "switch", "--detach", seed)
+        (src / "retry-ui").write_text("new Mac retry screen")
+        u.git(src, "add", "retry-ui")
+        u.git(src, "commit", "-m", "new Mac retry UI")
+        cfg["seed"] = u.git(src, "rev-parse", "HEAD")
+        rebuilt = u.candidate(cfg, replacing=old, pin_inputs=True)
+        assert rebuilt["version"] == old["version"] and rebuilt["commit"] != old["commit"]
+        assert rebuilt["forkMain"] == old["forkMain"] and rebuilt["upstream"] == old["upstream"]
+        assert "digests" not in rebuilt and u.read(u.ROOT / old["batch"] / "superseded.json") == old
+        assert u.git(u.ROOT / rebuilt["batch"] / "source", "show", "HEAD:retry-ui") == "new Mac retry screen"
+        # The old candidate is retained until the release branch contains it. A probe cannot delete it.
+        u.update(cfg, probe=True)
+        assert u.remote_ref(u.FORK, legacy_ref) == old["commit"]
+        # A later upstream change must not change the rebuilt version under test.
+        u.git(src, "switch", "--detach", next_upstream)
+        (src / "future-upstream").write_text("next button press")
+        u.git(src, "add", "future-upstream")
+        u.git(src, "commit", "-m", "new source for a later release")
+        u.git(src, "push", str(upstream), "HEAD:main")
+        u.git(origin, "config", "receive.denyDeletes", "true")
         u.update(cfg)
         second = u.read(u.ROOT / "completed.json")
+        assert u.read(u.ROOT / "status.json")["phase"] == "complete"
+        assert second["commit"] == rebuilt["commit"] and second["upstream"] == next_upstream
+        u.git(upstream, "update-ref", "refs/heads/main", next_upstream)
+        assert second["ciCleanupPending"] == [old["commit"]]
+        assert u.remote_ref(u.FORK, release_ref) == second["commit"] and u.remote_ref(u.FORK, legacy_ref) == old["commit"]
+        assert u.git(origin, "merge-base", "--is-ancestor", old["commit"], second["commit"], check=False) == 0
+        u.git(origin, "config", "receive.denyDeletes", "false")
+        u.update(cfg)
+        only_two_branches()
+        assert u.read(u.ROOT / "completed.json")["ciCleanupPending"] == []
+        # A legacy receipt may refer to a CI branch that another owner has repurposed.
+        second_ref = "refs/heads/fork/mac-ci/" + second["commit"]
+        u.git(origin, "update-ref", second_ref, fork_head)
+        u.git(origin, "update-ref", "refs/heads/fork/mac-ci/" + fork_head, fork_head)
+        u.save(u.ROOT / "completed.json", {k: v for k, v in second.items() if k not in ("ciCleanupPending", "ciBranch")})
+        u.update(cfg)
+        assert u.remote_ref(u.FORK, second_ref) == fork_head
+        assert u.remote_ref(u.FORK, "refs/heads/fork/mac-ci/" + fork_head) == fork_head
+        assert u.remote_ref(u.FORK, release_ref) == second["commit"]
         assert second["version"] == "1.0.2" and second["previous"] == tx["commit"]
         assert u.git(origin, "merge-base", "--is-ancestor", tx["commit"], second["commit"], check=False) == 0
         assert u.git(origin, "show", second["commit"] + ":file") == "fork"
@@ -338,7 +428,10 @@ def main():
         assert u.git(origin, "show", u.BRANCH + ":unmerged-code") == "keep this manual fix"
         assisted_release(folder, bun)
         out.parent.mkdir(parents=True,exist_ok=True)
-        u.save(out,{"realGit":True,"services":"local fixtures","cases":["no-push probe","untagged upstream main synced to fork main","CI failure","partial upload",
+        u.save(out,{"realGit":True,"services":"local fixtures","cases":["two permanent branches", "public tag stays fixed during staging", "same SHA retry", "moved staging head blocks CI and publication", "unrelated runtime release ignored",
+               "superseded failed first build fast-forwards", "sealed legacy candidate rebuilt with its input revisions",
+               "old branch protected by permanent history before deletion", "denied legacy cleanup retried on click",
+               "moved and unrelated branches retained", "no-push probe","untagged upstream main synced to fork main","CI failure","partial upload",
                "resume same commit","install after published checksums","up to date","second release preserves both fork changes","merge conflict","fork and upstream conflict preserves branches","no WhatsApp or Signal clearance","manual release branch change preserved",
                "app model combines two edits", "ambiguous and invalid model replies use owner window",
                "failed checks retain public main", "retry retains approved resolution", "owner chooses file for delete/edit conflict", "wrong click nonce refused", "credential-like hunk stays local", "independent word edits combine on one line"]})

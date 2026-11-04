@@ -3,7 +3,7 @@ import type { AgentModelId } from "./ipc-agent-identity";
 import type { AgentProviderId } from "./ipc-agent-status";
 import { integerInRange, isFiniteNumber, isIdentifier } from "./ipc-bounded-values";
 import { decodeRecord, nullableNumber, requiredBoolean, requiredNumber, requiredString } from "./ipc-decoding";
-import { isDynamicRecord, isString } from "./runtime-values";
+import { isDynamicRecord, isOneOf, isString } from "./runtime-values";
 
 export type DesktopPlatform = "darwin" | "win32" | "linux";
 export type AppVariant = "production" | "dev" | "preview";
@@ -32,6 +32,26 @@ export const UPDATE_PHASES = [
   "unsupported",
 ] as const;
 
+const FORK_UPDATE_RETRY_PHASES = [
+  "conflict",
+  "held",
+  "failed",
+  "failed.sync",
+  "failed.checks",
+  "failed.sign",
+  "failed.quit",
+  "failed.quitHelperTimeout",
+  "failed.backup",
+  "failed.verifyCopy",
+  "failed.publish",
+  "failed.install",
+  "failed.launch",
+] as const;
+
+export function isForkUpdateRetryPhase(value: unknown): value is (typeof FORK_UPDATE_RETRY_PHASES)[number] {
+  return isOneOf(FORK_UPDATE_RETRY_PHASES, value);
+}
+
 export const FORK_UPDATE_PHASES = [
   "idle",
   "syncing",
@@ -41,9 +61,7 @@ export const FORK_UPDATE_PHASES = [
   "installing",
   "upToDate",
   "complete",
-  "conflict",
-  "held",
-  "failed",
+  ...FORK_UPDATE_RETRY_PHASES,
 ] as const;
 
 export type ForkUpdatePhase = (typeof FORK_UPDATE_PHASES)[number];

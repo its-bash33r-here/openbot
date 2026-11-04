@@ -675,9 +675,9 @@ popover. Release signing secrets and the complete procedure are documented in
 [docs/RELEASING.md](docs/RELEASING.md).
 
 On a Mac configured to publish this fork, select the local server and open **Settings → Updates →
-Update this Mac**. This action syncs upstream main into fork main, checks and signs the Mac build,
-publishes it and installs it when OpenBot is idle. If Git reports a conflict, resolve the listed
-files before retrying. See the [Mac update guide](scripts/fork-update/README.md).
+Update this Mac**. OpenBot syncs upstream into `main` and runs checks on the candidate in
+`fork/mac-release`. After the checks pass, it signs the Mac build, tests a copy of your profile,
+publishes the release and installs it. If a step fails, open Updates and select **Retry**. See the [Mac update guide](scripts/fork-update/README.md).
 
 ## Contributing
 
