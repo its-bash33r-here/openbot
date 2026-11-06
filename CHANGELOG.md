@@ -6,6 +6,45 @@ All notable changes to OpenBot will be documented here. The project follows
 
 ## [Unreleased]
 
+## [0.63.1] - 2026-11-06
+
+### Added
+
+- A server owner or admin can now log in a server's Codex with an OpenAI API key from Settings >
+  Providers > Codex > API key. Before, the key option showed only for Codex on this computer. The
+  server must run this version.
+- Choose who can control this computer with remote desktop: the owner, owners and admins, or every
+  member. Find it in Server settings › Remote desktop. Every member can still control it until you
+  change the setting.
+- Turn on **Ask on this computer** to allow or deny each remote desktop session at the computer. A
+  session that nobody allows in 30 seconds does not start.
+- While someone controls this computer, OpenBot shows a notification and a menu bar or tray item
+  with their name. **Stop all remote control** in that menu or in Settings ends every session.
+
+### Changed
+
+- A server owner or admin can now open a file that an agent wrote outside its workspace, such as in
+  `~/Desktop`, from the phone or the web client. This works when the agent has no workspace limit, as
+  on the desktop. Members can still open only files in the workspace.
+- Agents now write the full path of a file outside their workspace, so a click or tap on the file
+  name opens the file. Before, a reply could name only `test.md`, and the file did not open.
+- Agent browser tabs refuse cookie banners automatically. They click only a reject button, never accept. Tabs that you open keep their banners, and the refusal stops when you take control of a tab.
+- Include the latest upstream updates in the local Mac app while keeping the fork signing identity and updater settings.
+
+### Fixed
+
+- A removed server member stays removed when another admin changes their role at the same time. Before, the role change could make the member active again.
+- A voice recording that started after the microphone stopped the previous one by itself now runs to the full time limit. Before, it could stop early.
+- Stop now ends an agent turn after a short wait even when the agent does not answer the stop request. Before, the turn could stay open.
+- On Windows, OpenBot works normally after another app cancels a sign-out or shutdown. Before, closing the window then quit OpenBot instead of keeping it in the background.
+- When you select other text while an instruction for a selection is being sent, the new selection keeps its action bar. Before, the result of the first send could close the bar or show an error on it.
+- An attachment download from a server that the server stops, or that arrives damaged, now fails at once. Before, it waited one minute for a timeout.
+- A hosted server that you wake no longer goes back to "stopped" for a short time. Before, a status check that started before the wake could replace the "waking" state and send the start request again.
+- A connection to a server now fails at once when the server disconnects during the connection handshake. Before, the app waited 30 seconds before it showed the error or tried again. Also, the app no longer starts new server connections while it quits.
+- A hosted server that you join again no longer shows "Starting" for a long time. Before, a wake reply that arrived while the server was being removed left a start that never ended.
+- An agent that you open in a new window now uses the full width of the window. Before, when the servers showed as a rail in the main window, the new window had an empty strip at the left.
+- A Claude Code agent now recovers when Claude Code cannot find the saved session of its chat. The message that finds the problem fails once with an explanation, and OpenBot starts a new session with the chat history, so the next message works. Before, each later message failed with "No conversation found with session ID", and Continue failed the same way. This occurred, for example, when the first message after a move to another Claude account failed at the terms prompt, or after a change of the Claude config folder.
+
 ## [0.63.0] - 2026-11-06
 
 ### Added
