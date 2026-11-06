@@ -29,11 +29,11 @@ const home = join(root, "home");
 const logPath = join(root, "protocol.jsonl");
 const controlPath = join(root, "control.json");
 const fakeCodex = join(root, "codex");
-const defaultHome = join(home, ".codex");
+const defaultHome = join(userData, "provider-state", "codex");
 
 // Before the service modules load: the Codex process and the stores read the home folder.
 process.env.HOME = home;
-process.env.CODEX_HOME = defaultHome;
+process.env.CODEX_HOME = join(home, ".codex");
 process.env.OPENBOT_CODEX_PATH = fakeCodex;
 process.env.OPENBOT_FAKE_CODEX_LOG = logPath;
 process.env.OPENBOT_FAKE_CODEX_CONTROL = controlPath;

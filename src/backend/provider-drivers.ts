@@ -137,7 +137,7 @@ const CLI_LOGIN_TIMEOUT_MS = 10 * 60_000;
 /**
  * How a provider keeps more than one account on this computer. Its CLI keeps the credentials,
  * sessions and settings of one account in a home folder that one variable names, so each account
- * after the first gets a folder of its own. The first account stays in the CLI's default folder.
+ * after the first gets a folder of its own. Codex's first account also uses an OpenBot-owned folder.
  */
 export interface ProviderAccountSupport {
   /** The variable that names the CLI's home folder. */
@@ -487,6 +487,8 @@ export interface ProviderClientContext {
    * write. Optional for the same reason as `reportMcpDrops`.
    */
   readonly providerStateDirectory?: string;
+  /** Codex's default account home, separate from the personal Codex app and CLI. */
+  readonly codexHomeDirectory?: string;
   /**
    * A folder OpenBot owns for the temporary files of provider processes, emptied at each launch.
    * Optional for the same reason as `reportMcpDrops`: without it a process uses the system folder.
@@ -810,6 +812,7 @@ export const BUILT_IN_PROVIDER_DRIVERS: readonly BuiltInProviderDriver[] = [
       new CodexAppServerClient(cli.executable, requestTimeoutMs, {
         ...cliPathEnvironment(cli),
         ...context.serverEnvironment,
+        ...(context.codexHomeDirectory ? { CODEX_HOME: context.codexHomeDirectory } : {}),
         ...context.accountEnvironment,
       }),
     authState: (account) => ({ kind: "chatgpt", email: account?.email ?? null }),

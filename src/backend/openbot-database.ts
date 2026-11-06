@@ -472,8 +472,8 @@ export class OpenBotDatabase {
     return this.#sessions.listProviderSessionIds(externalSessionId);
   }
 
-  listExternalSessionIds(): string[] {
-    return this.#sessions.listExternalSessionIds();
+  listExternalSessionIds(provider?: AgentProviderId): string[] {
+    return this.#sessions.listExternalSessionIds(provider);
   }
 
   activeProviderSessionThreads(agentId: string): string[] {

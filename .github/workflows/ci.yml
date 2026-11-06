@@ -434,6 +434,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: bun run test:codex-missing-rollout
 
+      - name: Run the Codex home isolation E2E test
+        if: ${{ !cancelled() }}
+        run: bun run test:codex-home
+
       # The released build's registry is read from git. A shallow checkout has only the commit under test, so
       # fetch that one commit by its full hash, with no history. The pinned hash is the release in the script.
       - name: Fetch the released local-server registry source
@@ -653,6 +657,7 @@ jobs:
             .openbot-build/subagent-status-e2e/
             .openbot-build/codex-hung-app-server-e2e/
             .openbot-build/codex-missing-rollout-e2e/
+            .openbot-build/codex-home-e2e/
             .openbot-build/codex-usage-metering-e2e/
             .openbot-build/codex-usage-reset-e2e/
             .openbot-build/usage-read-pacing-e2e/
@@ -824,6 +829,16 @@ jobs:
         if: ${{ !cancelled() }}
         run: bun run test:provider-transcript-replay
 
+      - name: Install the pinned Codex runtime for history checks
+        if: ${{ !cancelled() }}
+        run: bun run install:codex-runtime
+
+      - name: Run the real Codex home isolation E2E test
+        if: ${{ !cancelled() }}
+        env:
+          OPENBOT_CODEX_PATH: ${{ github.workspace }}/build/codex/linux/x64/bin/codex
+        run: bun run test:codex-home-real
+
       - name: Upload the reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -833,6 +848,7 @@ jobs:
             .openbot-build/custom-acp-agent-e2e/
             .openbot-build/custom-acp-agent-login-path-e2e/
             .openbot-build/codex-login-path-e2e/
+            .openbot-build/codex-home-real-e2e/
             .openbot-build/antigravity-login-path-e2e/
             .openbot-build/antigravity-mcp-load-failure-e2e/
             .openbot-build/antigravity-expired-token-e2e/

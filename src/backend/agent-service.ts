@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { join } from "node:path";
 import { agentProviderDescriptor, customAgentIdOfModel } from "@openbot/contracts/agent-providers";
 import { sortConversationMessages } from "@openbot/contracts/conversation-order";
 import { developmentStartingModel } from "@openbot/contracts/development-defaults";
@@ -158,6 +159,7 @@ import { backgroundModel } from "./agent/background-model";
 import { BootRecovery } from "./agent/boot-recovery";
 import { BrowserUploads } from "./agent/browser-uploads";
 import type { ChatVisualPreviewHost } from "./agent/chat-visual-preview";
+import { CodexHome } from "./agent/codex-home";
 import { ContextCompaction } from "./agent/context-compaction";
 import { ConversationReader } from "./agent/conversation-reader";
 import { ConversationRuntime } from "./agent/conversation-runtime";
@@ -521,6 +523,7 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
   readonly #planContinuation = new PlanContinuation({ limit: 8 });
   #initialized = false;
   #stopping = false;
+  readonly #codexHome: CodexHome;
 
   constructor(options: AgentServiceOptions) {
     super();
@@ -552,6 +555,7 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
     this.#routineFlowTools = routineFlowTools;
     this.#workflowTools = workflowTools;
     this.#store = store;
+    this.#codexHome = new CodexHome(join(store.database.userDataPath, "provider-state", "codex"));
     // First of the sub-objects, because `#emitError` reads it to redact and every one of them is
     // given that callback.
     this.#mcp = new McpGateway({
@@ -910,6 +914,7 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
       // endpoint can refuse the prompt itself, after the waits every caller above it makes.
       credentials: {
         ...credentials,
+        codexHomeDirectory: this.#codexHome.home,
         // The server variables reach Claude and the ACP providers with the agent environment. The
         // thread lifecycle below gets the agent environment without them, so the fingerprint of a
         // Codex session stays the same; Codex reads them from the spawn environment of its app-server.
@@ -3829,6 +3834,13 @@ export class AgentService extends EventEmitter<AgentServiceEvents> {
       .pipe(
         Effect.mapError(
           (failure) => new AgentLifecycleFailed({ operation: "reconcile provider sessions", cause: failure.cause }),
+        ),
+      );
+    yield* this.#codexHome
+      .initialize(this.#store.database.listExternalSessionIds("codex"))
+      .pipe(
+        Effect.mapError(
+          (failure) => new AgentLifecycleFailed({ operation: "prepare Codex home", cause: failure.cause }),
         ),
       );
     yield* lifecycleStep("recover agent state", () => {

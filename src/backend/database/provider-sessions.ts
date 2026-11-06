@@ -87,9 +87,13 @@ export class ProviderSessions {
     ).map((row) => requiredStringColumn(row, "id"));
   }
 
-  listExternalSessionIds(): string[] {
+  listExternalSessionIds(provider?: AgentProviderId): string[] {
     return databaseRows(
-      this.#core.connection.prepare("SELECT DISTINCT external_session_id FROM projection_provider_sessions").all(),
+      this.#core.connection
+        .prepare(
+          "SELECT DISTINCT external_session_id FROM projection_provider_sessions WHERE ? IS NULL OR provider = ?",
+        )
+        .all(provider ?? null, provider ?? null),
     ).map((row) => requiredStringColumn(row, "external_session_id"));
   }
 

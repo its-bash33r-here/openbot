@@ -37,7 +37,6 @@ import { Deferred, Effect, Exit, Fiber, Result, Schema, Scope, Semaphore } from 
 import { isOpenCodeInternalFailure } from "./../acp-flavor-opencode";
 import { googleSignInByOpenBot, startAcpAuthentication } from "./../acp-sign-in";
 import { type AgentClient, AgentProcessExitError, type AgentProvider } from "./../agent-client";
-import { CodexAppServerClient } from "./../app-server-client";
 import {
   type AgentCliInfo,
   type BundledProviderExecutables,
@@ -550,7 +549,7 @@ export class ProviderRuntime implements ProviderPort {
       createClient: (cli) => {
         const client = this.#clientFactory
           ? this.#clientFactory("codex", cli)
-          : new CodexAppServerClient(cli.executable, this.#requestTimeoutMs, cliPathEnvironment(cli));
+          : requireProviderDriver("codex").createClient(cli, this.#requestTimeoutMs, this.#credentials);
         this.#bindClient(client);
         return client;
       },
@@ -579,6 +578,10 @@ export class ProviderRuntime implements ProviderPort {
     this.#providerAccounts = options.accounts
       ? new ProviderAccounts(options.accounts, {
           scope: () => this.#scope,
+          defaultEnvironment: (provider): Readonly<Record<string, string>> =>
+            provider === "codex" && this.#credentials.codexHomeDirectory
+              ? { CODEX_HOME: this.#credentials.codexHomeDirectory }
+              : {},
           cli: (provider) =>
             this.#clients.has(provider) || this.#released.has(provider) ? this.#cli.get(provider) : undefined,
           defaultLogin: (provider) => {

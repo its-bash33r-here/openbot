@@ -58,6 +58,21 @@ native model serialization are outside this measurement.
 
 ## History retrieval and replacement sessions
 
+Codex's default account uses `provider-state/codex` inside the OpenBot profile as its
+`CODEX_HOME`. Added accounts keep their existing private folders. Work, profile generation,
+sign-in, and sign-out use the same account home. Process overrides keep Codex's SQLite state,
+logs, and file credentials in that home, even when an imported config names other locations.
+These paths do not enter the thread environment or change the session fingerprint.
+
+Before providers start, `agent/codex-home.ts` copies the previous default account's config and
+file credentials, and the rollouts named by OpenBot's recorded Codex session IDs. It also copies
+their native child sessions. Active and archived rollouts, including compressed files, keep their
+original IDs and bytes. Personal sessions are excluded. Existing destination files are not
+replaced. The import writes its completion marker last and stops startup on an I/O failure.
+Source files and OpenBot's conversation database stay unchanged. Credentials stored only in an
+OS keychain need a new sign-in in OpenBot. After a completed import, sign-out is not reversed by
+another import. Old entries in the personal Codex app remain until the user archives them.
+
 A replacement provider session receives a handoff of at most 32,000 characters, including headers
 and message identifiers. The budget reserves 24,000 for recent messages, 4,000 for older excerpts,
 2,000 for captured work steps, and 2,000 for instructions and references. Unused space can hold more

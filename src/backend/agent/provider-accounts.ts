@@ -28,6 +28,7 @@ import { shortenDiagnostic } from "./../stderr-diagnostics";
 import { stopProcessTree } from "../windows-process-tree";
 import { usageWindowResetSince } from "./account-usage";
 import { captureBrowser } from "./browser-capture";
+import { codexHomeArguments } from "./codex-home";
 import type { ProviderAccountStore, StoredProviderAccount } from "./provider-account-store";
 import { ProviderProcessFailed, waitForSuccessfulProcess } from "./provider-status";
 import { providerLabel } from "./thread-items";
@@ -63,6 +64,8 @@ interface AccountState {
 /** What the accounts need from the provider runtime. */
 export interface ProviderAccountsHost {
   scope(): Scope.Scope;
+  /** The default account's private home, when it does not use the CLI's personal folder. */
+  defaultEnvironment?(provider: AgentProviderId): Readonly<Record<string, string>>;
   /** The CLI of the provider's own sign-in, or undefined when it is not connected. */
   cli(provider: AgentProviderId): AgentCliInfo | undefined;
   /** The login of the provider's own sign-in. */
@@ -267,7 +270,8 @@ export class ProviderAccounts {
           return yield* login.done;
         }
         const browser = onHost ? yield* captureBrowser(openExternal) : {};
-        const target = cliSpawnTarget(cli.executable, command.argv);
+        const home = this.environment(account).CODEX_HOME;
+        const target = cliSpawnTarget(cli.executable, [...command.argv, ...(home ? codexHomeArguments(home) : [])]);
         const child = yield* Effect.acquireRelease(
           Effect.sync(() =>
             spawn(target.command, target.args, {
@@ -683,8 +687,7 @@ export class ProviderAccounts {
   }
 
   /**
-   * Signs the provider's own sign-in out: the CLI's sign-out in the user's own home folder, which a
-   * terminal CLI on the same computer shares. The caller stops the client that still runs on it.
+   * Signs the provider's default account out in its home folder. The caller stops its client.
    */
   readonly signOutDefault = Effect.fn("ProviderAccounts.signOutDefault")(function* (
     this: ProviderAccounts,
@@ -696,7 +699,7 @@ export class ProviderAccounts {
       return yield* accountFailure(
         sourceText("error.provider.signOutUnsupported", { provider: providerLabel(provider) }),
       );
-    yield* this.#runSignOut(cli, command, {}).pipe(
+    yield* this.#runSignOut(cli, command, this.#host.defaultEnvironment?.(provider) ?? {}).pipe(
       Effect.mapError((error) => accountFailure(this.#message(provider, error))),
     );
   });
@@ -745,7 +748,8 @@ export class ProviderAccounts {
             Effect.mapError((error) => (error.cause instanceof ProviderSignInError ? error.cause : error)),
           );
         }
-        const target = cliSpawnTarget(cli.executable, command.argv);
+        const home = environment.CODEX_HOME;
+        const target = cliSpawnTarget(cli.executable, [...command.argv, ...(home ? codexHomeArguments(home) : [])]);
         const child = yield* Effect.acquireRelease(
           Effect.sync(() =>
             spawn(target.command, target.args, {

@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { type DynamicRecord, isNumber, isString } from "@openbot/contracts/runtime-values";
 import { sourceText } from "@openbot/i18n/source";
 import { Effect, Fiber } from "effect";
+import { codexHomeArguments } from "./agent/codex-home";
 import { LOG_TIMESTAMP_PREFIX } from "./agent/provider-diagnostics";
 import { AgentProcessExitError, type AgentProvider, RequestTimeoutError } from "./agent-client";
 import { cliSpawnTarget } from "./cli";
@@ -78,7 +79,7 @@ export class CodexAppServerClient extends EventEmitter<ClientEvents> {
   #stopping = false;
   #probing = false;
 
-  /** Added to the inherited environment, such as the `CODEX_HOME` of an account after the first. */
+  /** Added to the inherited environment, including the isolated account's `CODEX_HOME`. */
   readonly #extraEnv: Readonly<Record<string, string>> | undefined;
 
   constructor(executable: string, requestTimeoutMs = 30_000, extraEnv?: Readonly<Record<string, string>>) {
@@ -97,10 +98,18 @@ export class CodexAppServerClient extends EventEmitter<ClientEvents> {
 
     this.#stopping = false;
     this.#decoder = new JsonLineDecoder();
-    const target = cliSpawnTarget(this.#executable, ["app-server", "--listen", "stdio://"]);
+    const home = this.#extraEnv?.CODEX_HOME;
+    const target = cliSpawnTarget(this.#executable, [
+      "app-server",
+      "--listen",
+      "stdio://",
+      ...(home ? codexHomeArguments(home) : []),
+    ]);
     const child = spawn(target.command, target.args, {
       stdio: ["pipe", "pipe", "pipe"],
-      env: this.#extraEnv ? { ...process.env, ...this.#extraEnv } : process.env,
+      env: this.#extraEnv
+        ? { ...process.env, ...this.#extraEnv, ...(home ? { CODEX_SQLITE_HOME: home } : {}) }
+        : process.env,
       windowsVerbatimArguments: target.windowsVerbatimArguments,
       windowsHide: true,
     });
