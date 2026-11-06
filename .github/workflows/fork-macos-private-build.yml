@@ -1,0 +1,123 @@
+name: Fork macOS private build
+
+on:
+  push:
+    branches:
+      - codex/isolate-codex-history
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-macos-private-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Check and build macOS ARM64
+    if: github.repository == 'its-bash33r-here/openbot'
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: Check out the requested commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun and install dependencies
+        uses: ./.github/actions/setup-bun
+
+      - name: Check employee history isolation and resume
+        run: |
+          bun run test:codex-home
+          bun run test:codex-missing-rollout
+
+      - name: Check the desktop application
+        run: |
+          bun run check:desktop
+          bun run test:desktop -- --maxWorkers=2
+
+      - name: Prepare the voice runtime
+        run: bun run voice:prepare-runtime
+
+      - name: Download and verify the remote desktop runtime
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          bun run prepare:remote-desktop-runtime
+          bun run verify:remote-desktop-runtime
+
+      - name: Prepare the Computer Use driver and build the app
+        run: |
+          bun run prepare:cua-driver
+          bun run build
+
+      - name: Record the build source
+        shell: bash
+        run: |
+          git diff --exit-code HEAD --
+          bun - <<'JS'
+          import { execFileSync } from "node:child_process";
+          import { createHash } from "node:crypto";
+          import { readFileSync, writeFileSync } from "node:fs";
+          const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+          if (commit !== process.env.GITHUB_SHA) throw new Error("The checkout does not match the CI commit.");
+          const packageBytes = readFileSync("package.json");
+          const source = {
+            schemaVersion: 1,
+            version: JSON.parse(packageBytes.toString("utf8")).version,
+            sourceCommit: commit,
+            architecture: "arm64",
+            tree: execFileSync("git", ["rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim(),
+            repository: process.env.GITHUB_REPOSITORY,
+            ref: process.env.GITHUB_REF,
+            runId: process.env.GITHUB_RUN_ID,
+            runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+            builtAt: new Date().toISOString(),
+            packageSha256: createHash("sha256").update(packageBytes).digest("hex"),
+            lockSha256: createHash("sha256").update(readFileSync("bun.lock")).digest("hex"),
+            signed: false,
+            notarized: false,
+          };
+          writeFileSync("out/build-source.json", `${JSON.stringify(source, null, 2)}\n`);
+          JS
+
+      - name: Package the private app without signing or publishing
+        run: >-
+          bun x electron-builder --mac --arm64 --dir --publish never
+          --config.mac.identity=null --config.mac.notarize=false
+
+      - name: Verify the packaged application
+        run: bun run verify:package
+
+      - name: Archive the app and record checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p private-build
+          ditto -c -k --sequesterRsrc --keepParent dist/mac-arm64/OpenBot.app private-build/OpenBot-arm64.zip
+          cp out/build-source.json private-build/build-source.json
+          cd private-build
+          shasum -a 256 OpenBot-arm64.zip build-source.json > SHA256SUMS.txt
+
+      - name: Upload the private app
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fork-macos-private-build
+          path: private-build/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload history verification reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fork-macos-private-build-checks
+          path: |
+            .openbot-build/codex-home-e2e/report.json
+            .openbot-build/codex-missing-rollout-e2e/report.json
+          if-no-files-found: ignore
+          retention-days: 7
