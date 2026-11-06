@@ -595,6 +595,7 @@ export class CentralAuthManager extends EventEmitter<CentralAuthEvents> {
         name: string;
         ownerMembershipId: string;
         devicePublicKey?: string | null;
+        automatic?: boolean;
       },
     ): Effect.fn.Return<RegisteredRemoteHost, CentralAuthOperationError, CentralAuthTransport> {
       const sessionToken = this.#sessionToken;
