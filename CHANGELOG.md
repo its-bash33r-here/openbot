@@ -6,6 +6,35 @@ All notable changes to OpenBot will be documented here. The project follows
 
 ## [Unreleased]
 
+## [0.63.2] - 2026-11-06
+
+### Added
+
+- The Usage page now shows a cost for Pi, DeepSeek, OpenRouter and Inception turns. The cost is the one that Pi calculates from its model list, not what a subscription charges. Before, these turns showed tokens but no cost.
+- Choose what each custom provider model can read beside text: Images, and PDF on OpenCode. A Pi model with Images selected now gets the images that you attach and the images that the agent reads. Before, a Pi custom model got text only, and the agent answered that the model does not support images. An OpenCode model with PDF selected can read PDF files. You can also clear Images for an OpenCode model whose endpoint refuses images.
+- Find models now fills the context window, the max output and the accepted inputs of each custom provider model when the endpoint lists them, as OpenRouter, vLLM and gateways in the models.dev format do. A value that you typed or saved stays. A line under the list tells you which values come from the endpoint.
+
+### Fixed
+
+- Antigravity turns of an agent that an earlier version saved with an effort in its model name, such as `gemini-3.8-flash-high`, now show a cost. Before, they had no cost.
+- A channel with long agent thoughts opens again from a phone, the web or another computer. Before, the server refused to send it with the error `http/413/response_too_large`. The first page now holds fewer messages, and you load older ones as you scroll up.
+- The prompt cache time on the Claude page of **Settings › Providers** now updates when another
+  admin or the mobile app changes it. Before, the page showed the old time until the app started
+  again.
+- In Settings → Providers, a model switch in the Models section no longer makes the section flicker or the page jump. Before, each change hid the model list for a moment and then showed it again.
+- A server that you removed from your account no longer comes back by itself. Before, the computer
+  that runs it published it again within a minute, and the server returned to the server list of
+  each member. That computer now stays private and shows that the server was removed. Publish it
+  again on that computer to share it.
+- A selected server that cannot connect no longer keeps the whole window on the "Connecting to
+  OpenBot" screen. After the first failed attempt, the server shows its connection screen beside the
+  server list, so you can select another server.
+- Ping a Discord user that an OpenBot post mentions, for example a reminder. Before, the mention
+  showed the user but sent no notification. Roles and `@everyone` still get no ping.
+- Stop chats from showing through each other and the window from flickering when Transparent
+  window is on, on macOS 26 and later. OpenBot now builds the window with the blur when the setting
+  is on. If you turn the setting on while OpenBot runs, restart OpenBot once.
+
 ## [0.63.1] - 2026-11-06
 
 ### Added
