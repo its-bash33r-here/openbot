@@ -90,6 +90,17 @@ jobs:
           bun x electron-builder --mac --arm64 --dir --publish never
           --config.mac.identity=null --config.mac.notarize=false
 
+      # A directory target does not generate the updater config. Preserve the fork's feed.
+      - name: Keep the fork update feed
+        shell: bash
+        run: |
+          cat > dist/mac-arm64/OpenBot.app/Contents/Resources/app-update.yml <<'YAML'
+          provider: github
+          owner: its-bash33r-here
+          repo: openbot
+          updaterCacheDirName: openbot-fork-updater
+          YAML
+
       - name: Verify the packaged application
         run: bun run verify:package
 
