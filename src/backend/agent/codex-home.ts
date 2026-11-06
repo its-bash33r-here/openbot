@@ -14,7 +14,7 @@ const MARKER = ".openbot-isolated-v1";
 const ROLLOUT_ID = /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(?:\.zst)?$/iu;
 const MAX_METADATA_BYTES = 4 * 1024 * 1024;
 
-export class CodexHomeFailed extends Schema.TaggedError<CodexHomeFailed>()("CodexHomeFailed", {
+class CodexHomeFailed extends Schema.TaggedError<CodexHomeFailed>()("CodexHomeFailed", {
   cause: Schema.Defect(),
 }) {}
 
