@@ -87,6 +87,7 @@ import { AGENT_THREADS_CAPABILITY } from "@openbot/contracts/team-protocol/agent
 import { AGENT_UPDATE_CAPABILITY } from "@openbot/contracts/team-protocol/agent-update-v1";
 import { BITWARDEN_CONNECTOR_CAPABILITY } from "@openbot/contracts/team-protocol/bitwarden-connector-v1";
 import { BROWSER_PROFILES_CAPABILITY } from "@openbot/contracts/team-protocol/browser-profiles-v1";
+import { BROWSER_PROXIES_CAPABILITY } from "@openbot/contracts/team-protocol/browser-proxies-v1";
 import { CHANNEL_ROUTES } from "@openbot/contracts/team-protocol/channels-v1";
 import { CONNECTORS_CAPABILITY } from "@openbot/contracts/team-protocol/connectors-v1";
 import {
@@ -159,6 +160,7 @@ import {
   createHostBrowserProfile,
   deleteEventRoutine,
   deleteHostBrowserProfile,
+  deleteHostBrowserProxy,
   deleteHostedSite,
   deleteHostVaultItem,
   deleteSharedTable,
@@ -184,6 +186,7 @@ import {
   listEventRoutines,
   listHiddenAgents,
   listHostBrowserProfiles,
+  listHostBrowserProxies,
   listHostedSites,
   listHostVault,
   listMcpServers,
@@ -210,6 +213,7 @@ import {
   resetAgentSessionSetting,
   rotateEventRoutineSecret,
   saveEventRoutine,
+  saveHostBrowserProxy,
   saveHostVaultItem,
   saveMcpServer,
   setAgentHidden,
@@ -219,6 +223,7 @@ import {
   setAgentSkillEnabled,
   setHostAgentAccess,
   setHostAgentMemoryLimit,
+  setHostBrowserProfileProxy,
   setHostTimezone,
   setHostUpdateSettings,
   setMcpServerEnabled,
@@ -425,6 +430,10 @@ type HostRequestActions = Pick<
   | "deleteBrowserProfile"
   | "loadAgentBrowserProfile"
   | "updateAgentBrowserProfile"
+  | "loadBrowserProxies"
+  | "saveBrowserProxy"
+  | "deleteBrowserProxy"
+  | "setBrowserProfileProxy"
   | "loadMessagingConnections"
   | "connectMessaging"
   | "completeMessagingInstall"
@@ -481,7 +490,15 @@ type HostRequestActions = Pick<
   | "setMessageReaction"
   | "deleteMessage"
   | "downloadAttachment"
+  | "downloadMessageFile"
 >;
+
+/** A file that the host sends, such as an attachment or a workspace file. */
+function decodeHostFile(value: unknown): RemoteFileUpload {
+  if (!isDynamicRecord(value) || !isString(value.name) || !isString(value.mimeType) || !isString(value.base64))
+    throw new Error("The host returned an invalid file.");
+  return { name: value.name, mimeType: value.mimeType, base64: value.base64 };
+}
 
 /** A host that serves `agent-hidden-v1` owns the hidden agents of its members. */
 function hidesAgentsOnHost(capabilities: readonly string[] | undefined): boolean {
@@ -642,6 +659,8 @@ export function createHostRequestActions({
   const phoneTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
   const browserProfilesAdmin = (serverId: string) =>
     capabilityApi(serverId, BROWSER_PROFILES_CAPABILITY, "mobile.server.browserProfiles.unsupported");
+  const browserProxiesAdmin = (serverId: string) =>
+    capabilityApi(serverId, BROWSER_PROXIES_CAPABILITY, "mobile.server.browserProxies.unsupported");
   /** The OpenBot update of the host: the admin route set, or the member set that only checks and starts. */
   const updateApi = (serverId: string, access: ServerUpdateAccess) =>
     capabilityApi(
@@ -773,6 +792,13 @@ export function createHostRequestActions({
       runTeamRequest(getHostAgentBrowserProfile(browserProfilesAdmin(serverId), agentId)),
     updateAgentBrowserProfile: async (input, serverId) =>
       runTeamRequest(updateHostAgentBrowserProfile(browserProfilesAdmin(serverId), input)),
+    loadBrowserProxies: async (serverId) => runTeamRequest(listHostBrowserProxies(browserProxiesAdmin(serverId))),
+    saveBrowserProxy: async (input, serverId) =>
+      runTeamRequest(saveHostBrowserProxy(browserProxiesAdmin(serverId), input)),
+    deleteBrowserProxy: async (input, serverId) =>
+      runTeamRequest(deleteHostBrowserProxy(browserProxiesAdmin(serverId), input)),
+    setBrowserProfileProxy: async (input, serverId) =>
+      runTeamRequest(setHostBrowserProfileProxy(browserProxiesAdmin(serverId), input)),
     loadMessagingConnections: async (platform, serverId) =>
       runTeamRequest(messagingConnectorOverview(connectorsAdmin(serverId), { platform })),
     connectMessaging: async (input, serverId) =>
@@ -1317,22 +1343,7 @@ export function createHostRequestActions({
     },
     downloadAttachment: (serverId, attachmentId) => {
       const download = () =>
-        request(
-          "GET",
-          TEAM_API_ROUTES.attachment(attachmentId),
-          (value) => {
-            if (
-              !isDynamicRecord(value) ||
-              !isString(value.name) ||
-              !isString(value.mimeType) ||
-              !isString(value.base64)
-            )
-              throw new Error("The host returned an invalid file.");
-            return { name: value.name, mimeType: value.mimeType, base64: value.base64 };
-          },
-          undefined,
-          serverId,
-        );
+        request("GET", TEAM_API_ROUTES.attachment(attachmentId), decodeHostFile, undefined, serverId);
       // Limit native/DOM copies when a message contains several large images.
       const result = attachmentDownloads.current.then(download);
       attachmentDownloads.current = result.then(
@@ -1341,6 +1352,18 @@ export function createHostRequestActions({
       );
       return result;
     },
+    // The user waits for this one file, so it does not wait behind the images of the chat.
+    downloadMessageFile: (serverId, file) =>
+      request(
+        "GET",
+        file.kind === "shared"
+          ? `${TEAM_API_ROUTES.sharedFiles}?${new URLSearchParams({ path: file.path })}`
+          : // The released URL spells the agent `botId`.
+            `${TEAM_API_ROUTES.workspaceFiles}?${new URLSearchParams({ botId: file.agentId, path: file.path })}`,
+        decodeHostFile,
+        undefined,
+        serverId,
+      ),
   };
   return { checks, actions };
 }
