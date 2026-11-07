@@ -6,6 +6,121 @@ All notable changes to OpenBot will be documented here. The project follows
 
 ## [Unreleased]
 
+## [0.63.3] - 2026-11-07
+
+### Added
+
+- Connect GitLab.com from the Apps marketplace with browser sign-in, so agents can work with projects, issues, merge requests, repositories and CI pipelines. For a self-hosted GitLab, add its MCP server address in the MCP servers settings.
+- A thread tab now shows Load older messages when the thread has more than its newest 100 messages. Before, the older messages of a long thread could not be shown. On a joined server, this needs a host on this version.
+- Read the openbot.run home page in Polish. Open `openbot.run/pl`, or set Polish as the first
+  language of your browser. The header, the menu and the footer of the home page are in Polish too.
+- Read the Teams, Pricing and Contact pages of openbot.run in Polish, at `openbot.run/pl/teams`,
+  `openbot.run/pl/pricing` and `openbot.run/pl/contact`. Links on a Polish page go to the Polish pages.
+- Choose English or Polish with the language button in the openbot.run header, on the home, Teams,
+  Pricing and Contact pages. The website keeps your choice for one year.
+- The openbot.run footer links to OpenBot on Threads, LinkedIn, Reddit, Instagram, TikTok and Facebook.
+- The openbot.run home page shows two more features: multiplayer mode, where people and agents work
+  in shared channels, and workflows, which join agents, models and approval steps.
+- Connect Omnisend from the Apps marketplace with browser sign-in, so agents can read campaign reports and work with contacts, segments, campaigns and automations. Select read-only access on the Omnisend consent screen when agents only need reports.
+- Connect ElevenLabs from the Apps marketplace with browser sign-in to turn text into speech, work with voices, and manage ElevenLabs voice agents. Each generation uses ElevenLabs credits.
+- Sign in to MCP servers that accept only a client metadata document and have no client registration, such as ElevenLabs.
+
+### Changed
+
+- New Grok agents now start on `grok-4.7`, and the model picker marks it as the Grok default.
+  Agents that exist keep their model. A Grok CLI that does not list `grok-4.7` starts new agents on
+  the first model in its list.
+- The rail at the side of a long chat now shows one short tick per message you wrote, at equal
+  spacing. With a mouse, the ticks show when the pointer comes near the rail. Point at a tick to see
+  a card with the message and the start of its reply; the ticks beside it grow a little. Click the
+  tick to go to that message.
+- Ping a Slack user that an OpenBot post mentions as `<@user ID>`, for example a question from an
+  agent to a teammate. Before, the post showed the mention as text and sent no notification.
+  Channels, `@here`, `@everyone` and user groups still get no ping.
+- New text on the openbot.run home page: the first section, the agent section and the feature
+  section.
+- The openbot.run header shows the menu button up to a window width of 1100px, not 900px, so that the
+  links do not overlap the logo in Polish.
+- A theme change now moves across the window in a soft wave of color, instead of a sudden switch.
+- When you click Download or Restart on the update button in the sidebar, a ring of color moves
+  in to the button or out from it. Restart waits half a second so that you can see the ring.
+  Nothing moves when the window is hidden or when your system asks for reduced motion.
+- A message longer than 20,000 characters shows its start and a "Show full message" button. Before, the app drew the whole message, and a very long agent message could stop the window for many seconds.
+- You can now attach a file of any type to a chat, for example a VPN profile (`.ovpn`), a
+  certificate (`.pem`) or a Terraform file (`.tf`). Before, OpenBot refused a file whose extension
+  was not in its list. The agent gets the file's path and reads it with its own tools. Open shows the
+  file in the file manager. A remote server must run this version of OpenBot to take these files.
+- A Grok Bot or Hermes Agent export can now be up to 2 GB and 50,000 files, the same as a transfer
+  between OpenBot computers. Before, the limit was 500 MB and 5,000 files, so the export agent refused
+  larger workspaces. An import into a joined server still accepts a file of 100 MB or less.
+- A hosted server that was asleep connects sooner after you open it. The server starts OpenBot sooner, publishes itself to the account service right after it signs in, and the app connects as soon as the server is ready instead of at its next check.
+- After a wake, a hosted server checks its providers with a longer time limit while its disk is restored, and looks for provider updates after the restore. Before, a provider that worked could show that the computer was busy.
+- A hosted server no longer saves its npm download cache when it goes to sleep, so a wake restores less data.
+- A new hosted server no longer installs Hermes and Cursor by itself when OpenBot starts. To use them, select Download on their provider row. Before, each server saved about 3 GB of these CLIs, and each wake restored them.
+- The installed app uses about 150 MB less disk space: it no longer includes the source maps of its dependencies.
+- After a server starts, the phone, the web and other computers now show its agents as soon as the
+  agents are loaded. Before, they waited until each AI provider had started, which took about 40
+  seconds on a hosted server after a wake.
+- The app download is smaller: it no longer holds copies of libraries that are already built into
+  the app, such as the diagram and icon libraries. A hosted server also has less data to restore
+  when it wakes.
+- When product analytics is on, the startup summary now also records how long each startup step
+  took, rounded. Before, it recorded only the slowest step. It records no names, paths or content.
+
+### Fixed
+
+- "Keep memories in this channel" now works on a joined server and in the browser client. Before,
+  the switch always showed off there, and turning it on saved nothing. A server that is not updated
+  hides the switch.
+- Chats open, scroll and update faster, most of all on slower computers. Before, each new message, row or reply text in a chat made the app restyle almost the whole window, because some styles watched the whole page for open panels.
+- A turn that ends without an answer, for example one that you stop or that a restart interrupts, now shows its steps in a row of its own in the agent chat, in channels and in thread tabs. Before, its thinking was not shown after the turn ended, and a chat or a thread whose newest messages were only that thinking showed no rows.
+- Keep the database small when a channel member streams a long message. Before, each update of
+  the message wrote a full copy of it to the event history, so a long thought added gigabytes.
+  Messages from before this update keep their earlier copies.
+- Keep OpenBot employee chats separate from the personal Codex app. Import existing employee sessions and their child sessions without changing the original history, so conversations can resume.
+- **If OpenBot asks you to connect ChatGPT after the upgrade, sign in again in OpenBot.**
+- When a provider's quota runs out after an agent starts work on a message, for example a spent Gemini quota, the agent now continues that work on its first ready backup model. Before, the message failed with the usage error and the agent stayed on the spent model. This also applies when the agent is set to ask before it switches, and when the first backup's quota is spent too.
+- Sign in to MCP servers, such as ActiveCampaign, that let OpenBot ask only for the scope it
+  registered. Before, the authorization page showed `invalid_scope` for `offline_access`, and the
+  sign-in did not finish. OpenBot now registers `offline_access` with the other scopes. When the
+  server reports an earlier registration without it, OpenBot registers again.
+- A Pi, DeepSeek, Inception or OpenRouter turn no longer keeps running after its final answer when you saved a short password or API key. Before, the turn stayed active and the next queued message waited until the app restarted.
+- A chat opens with less work when its draft has no tags. Before, the message box read its scroll
+  position each time a list of the chat loaded (skills, MCP servers, tabs and threads), and each read
+  laid out the window again.
+- After you add OpenBot to Slack or Discord, the "Open OpenBot" button on the openbot.run return
+  page now shows also when a browser extension or a script error stops the rest of the page. Before,
+  the page showed only "Return to OpenBot", and the connection did not finish.
+- The desktop log now records why a Slack or Discord connection from the browser did not finish.
+- A chat or channel with one message larger than about 1.5 MB opens on a phone, in the web app and on a joined computer. Before, the chat showed "response too large" and the older messages did not load. The device now gets the start and the end of that message, up to 256 KB, with a note that tells how much is not shown. The full message stays on the computer that runs the server.
+- A new Claude chat uses a little less of the Claude usage window. Claude no longer sends an extra request to name each new session, because OpenBot now gives the name.
+- When a provider, such as Grok, cannot use an MCP server from your MCP settings, OpenBot now shows an
+  "MCP server not started" message that names the server. A server that asks for a sign-in tells
+  you to sign in to it, and the message has an "Open MCP settings" button. Before, the provider's raw
+  text showed as a provider error, and the provider row showed "Error" while the provider worked. A
+  server whose name was not in that text showed no message at all. Each server shows its message
+  once while OpenBot runs.
+- In the desktop app, the agent name or avatar in a teammate message now opens the side thread that sent the message, or else the agent's own chat. Before, it opened the side thread that the agent showed last, which was often an unrelated thread.
+- An agent that answers a teammate's request with an unknown message ID now gets an error and can send the answer again. Before, the answer went to the teammate's main chat, not to the side thread that asked, and that side thread waited for an answer that never came.
+- On Windows, a message with an attachment, such as a pasted image, no longer fails with "OpenBot does
+  not have permission to complete this action" when antivirus or the search indexer opens the new file
+  for a moment. OpenBot now tries again for about 3 seconds before it shows the error.
+- A hosted server that went to sleep after a wake now closes OpenBot cleanly. Before, OpenBot stopped with its database still open, and the next start checked the whole database first, which made it slower.
+- Show the approval and question cards of two Codex agents on different Codex accounts at the same
+  time, and send each answer only to its own agent. Before, the second card replaced the first, the
+  first agent waited forever, and an answer to the first card ran the request of the other agent.
+- Let an agent fill a saved Proton Pass login in the browser. Before, `submit_secret` refused the
+  Proton Pass login id from `list_logins`, because the id was longer than 128 characters.
+- A hosted server now starts after a stop that left a lock file of its virtual display. Before,
+  each start of OpenBot failed after 20 to 40 seconds, again and again. The stop now waits until
+  the display closes, and a start removes a lock file that no process holds.
+- You can now add an agent or a skill from the Marketplace to a server that you made on this computer. Before, Add stopped with `http/409/team_api_error`, because that server has no account session. The desktop app now reads the listing with its own account.
+- Proton Pass logins now work after OpenBot restarts. Before, each read failed with "Could not
+  connect Proton Pass. Connect again." until you disconnected and connected Proton Pass again.
+- A Proton Pass login with no password, for example one with only a passkey, now gives "has no
+  password for this site" when an agent uses it to sign in. Before, OpenBot reported that the password
+  manager could not be read, and signed in to Proton Pass again.
+
 ## [0.63.2] - 2026-11-06
 
 ### Added
