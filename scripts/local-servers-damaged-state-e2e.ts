@@ -78,6 +78,9 @@ function service(root: string, recorder: Recorder): LocalServers {
       detachLocalServer: () => Effect.void,
     },
     account: {
+      apiOrigin: "https://account.invalid",
+      requestAuthorized: () => Effect.die(new Error("An invalid server requested Marketplace data.")),
+      downloadAuthorized: () => Effect.die(new Error("An invalid server requested a Marketplace download.")),
       accountId: () => "synthetic-account",
       register: () => Effect.void,
       credential: () => "synthetic-machine-token",
