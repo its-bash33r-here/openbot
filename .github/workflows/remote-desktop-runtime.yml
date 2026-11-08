@@ -49,6 +49,7 @@ concurrency:
 jobs:
   prepare:
     name: Read build identity
+    if: github.repository == 'nightly-labs/openbot'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -354,7 +355,7 @@ jobs:
   publish:
     name: Publish immutable runtime prerelease
     needs: [prepare, build]
-    if: github.event_name != 'pull_request' && always() && needs.prepare.result == 'success' && needs.build.result == 'success'
+    if: github.repository == 'nightly-labs/openbot' && github.event_name != 'pull_request' && always() && needs.prepare.result == 'success' && needs.build.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -569,7 +570,7 @@ jobs:
     # match it. Dispatched from a branch that changes the recipe -- the one case where publishing before
     # merging is the point -- this job checks out main, whose digest is still the old one, and throws.
     # Folding the pin into the branch is a manual step there -- `docs/RELEASING.md` has the sequence.
-    if: github.ref == 'refs/heads/main' && needs.publish.result == 'success' && needs.verify-published.result == 'success'
+    if: github.repository == 'nightly-labs/openbot' && github.ref == 'refs/heads/main' && needs.publish.result == 'success' && needs.verify-published.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
