@@ -1,5 +1,6 @@
 import {
   type AgentEvent,
+  type AgentStepActivity,
   type AgentSummary,
   agentProviderDescriptor,
   type BrowserControlState,
@@ -79,7 +80,9 @@ import {
   isToolItem,
   refusedSessionFailure,
   type ToolUsageSignal,
+  toolActivity,
   toolFailed,
+  toolFailureText,
   toolProgressText,
   toolTraceDetail,
   toolUsage,
@@ -116,6 +119,19 @@ interface HeldProviderError {
   context: FailureContext & { causeCode: CauseCode };
   /** A spent balance or quota: the usage notice explains it, so a turn that does not move shows no banner. */
   quiet?: boolean;
+  /** The Google page where the user fixes the account that failed the turn. */
+  link?: string;
+}
+
+/**
+ * The page that an ACP client names for an account the user must fix (#2419). Only a Google sign-in
+ * page: the error banner opens it, and the other clients pass their provider's fields through.
+ */
+function accountLink(params: unknown): string | undefined {
+  const link = getString(params, "link");
+  if (!link || !URL.canParse(link)) return undefined;
+  const url = new URL(link);
+  return url.protocol === "https:" && url.hostname === "accounts.google.com" ? link : undefined;
 }
 
 export interface AgentBrowserHost extends AttentionBrowserHost, BrowserUploadTarget {
@@ -152,7 +168,8 @@ export interface AgentBrowserHost extends AttentionBrowserHost, BrowserUploadTar
 export interface TurnHooks {
   emitFailure?(failure: FailureSignal): void;
   emit(event: AgentEvent): void;
-  emitError(code: string, error: unknown, agentId?: string, context?: FailureContext): void;
+  /** `link` is a page that the error banner opens. It is not part of the failure report. */
+  emitError(code: string, error: unknown, agentId?: string, context?: FailureContext, link?: string): void;
   emitRuntimeSnapshot(): void;
   scheduleDrain(agentId: string): void;
   /**
@@ -335,6 +352,8 @@ export class TurnLifecycle {
       firstOutputAt: number | null;
       produced: boolean;
       acted: boolean;
+      /** The tool steps that started and did not end yet. While one is open, the turn works, it does not wait. */
+      openTools: Set<string>;
     }
   >();
   /** The drain's start of each starting delivery, until its turn starts. */
@@ -611,7 +630,7 @@ export class TurnLifecycle {
   #showFailoverError(agentId: string, threadId: string, failover: HeldProviderError): void {
     const taskId = this.#taskForThread(agentId, threadId);
     if (taskId === null && !failover.quiet) {
-      this.#hooks.emitError("agent_error", failover.message, agentId, failover.context);
+      this.#hooks.emitError("agent_error", failover.message, agentId, failover.context, failover.link);
       return;
     }
     this.#hooks.emitFailure?.({ code: "agent_error", agentId, ...failover.context });
@@ -706,6 +725,7 @@ export class TurnLifecycle {
           firstOutputAt: null,
           produced: false,
           acted: false,
+          openTools: new Set(),
         });
         this.#traces.begin(turnId, new Date().toISOString());
         const publicThreadId = this.#conversation.publicThreadId(agentId, threadId);
@@ -1035,6 +1055,7 @@ export class TurnLifecycle {
           turnId: errorTurnId,
           severity: notification.method === "warning" ? ("warning" as const) : ("error" as const),
         };
+        const link = notification.method === "error" ? accountLink(params) : undefined;
         // A provider error moves an agent set to switch without asking to its next backup model. The
         // error waits for the end of the turn: a turn that did nothing yet runs again there instead.
         if (
@@ -1045,7 +1066,7 @@ export class TurnLifecycle {
           FAILOVER_CAUSES.has(context.causeCode) &&
           this.#mayHoldError(agentId, errorTurnId, context.causeCode)
         ) {
-          this.#failoverTurns.set(errorTurnId, { message, context });
+          this.#failoverTurns.set(errorTurnId, { message, context, ...(link ? { link } : {}) });
           return;
         }
         const taskId =
@@ -1053,7 +1074,7 @@ export class TurnLifecycle {
         if (taskId !== null) {
           this.#hooks.emitFailure?.({ code: "agent_error", ...(agentId ? { agentId } : {}), ...context });
           this.#hooks.taskFailed(taskId, message);
-        } else this.#hooks.emitError(`agent_${notification.method}`, message, agentId, context);
+        } else this.#hooks.emitError(`agent_${notification.method}`, message, agentId, context, link);
       }
     }
   }).bind(this);
@@ -1889,9 +1910,37 @@ export class TurnLifecycle {
     if (usage) this.#hooks.emitToolUsage({ ...usage, agentId, turnId });
     if (yield* this.#images.handleItem(agentId, threadId, turnId, item, completed)) return;
     const toolProgress = toolProgressText(item, completed);
-    this.#observeTraceStep(turnId, item, completed, toolProgress);
+    const openTools = this.#runningTurns.get(turnId)?.openTools;
+    let lastToolClosed = false;
+    if (openTools && isToolItem(item) && isString(item.id)) {
+      if (completed) lastToolClosed = openTools.delete(item.id) && openTools.size === 0;
+      else openTools.add(item.id);
+    }
+    // MCP credentials and the shared secret patterns come out before the text leaves the agent service.
+    const failure = completed ? toolFailureText(item, (text) => this.#hooks.redactMcp(text)) : null;
+    this.#observeTraceStep(turnId, item, completed, toolProgress, failure);
     if (toolProgress) {
-      this.#emitTurnProgress(agentId, this.#conversation.publicThreadId(agentId, threadId), turnId, toolProgress);
+      const activity = toolActivity(item, completed);
+      this.#emitTurnProgress(
+        agentId,
+        this.#conversation.publicThreadId(agentId, threadId),
+        turnId,
+        toolProgress,
+        activity,
+        failure,
+      );
+      return;
+    }
+    // A tool whose end adds no line, such as a memory search, still ends its step. Without this the
+    // client keeps `running` and the face of that step until the next line.
+    if (lastToolClosed) {
+      this.#emitTurnProgress(
+        agentId,
+        this.#conversation.publicThreadId(agentId, threadId),
+        turnId,
+        sourceText("status.agent.toolResultReviewing"),
+        "reviewing",
+      );
       return;
     }
     if (item.type !== "agentMessage" || !isString(item.id)) return;
@@ -2030,7 +2079,13 @@ export class TurnLifecycle {
   }
 
   /** Records a step for the trace: a tool step, a thought or an answer. Other items have no step. */
-  #observeTraceStep(turnId: string, item: ThreadItem, completed: boolean, toolProgress: string | null): void {
+  #observeTraceStep(
+    turnId: string,
+    item: ThreadItem,
+    completed: boolean,
+    toolProgress: string | null,
+    failure: string | null,
+  ): void {
     if (!isString(item.id)) return;
     if (isToolItem(item)) {
       const failed = completed && toolFailed(item);
@@ -2038,6 +2093,7 @@ export class TurnLifecycle {
         completed,
         failed,
         text: toolProgress,
+        error: failure,
         ...toolTraceDetail(item),
       });
     } else if (item.type === "agentMessage")
@@ -2068,13 +2124,24 @@ export class TurnLifecycle {
     return message;
   }
 
-  #emitTurnProgress(agentId: string, threadId: string, turnId: string, text: string): void {
+  #emitTurnProgress(
+    agentId: string,
+    threadId: string,
+    turnId: string,
+    text: string,
+    activity: AgentStepActivity | null = null,
+    error: string | null = null,
+  ): void {
+    const running = (this.#runningTurns.get(turnId)?.openTools.size ?? 0) > 0;
     this.#hooks.emit({
       type: "turn-progress",
       agentId,
       threadId,
       turnId,
       detail: text,
+      ...(running ? { running } : {}),
+      ...(activity ? { activity } : {}),
+      ...(error ? { error } : {}),
     });
   }
 }

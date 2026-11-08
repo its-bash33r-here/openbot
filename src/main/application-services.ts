@@ -94,6 +94,7 @@ import type {
 } from "@openbot/contracts/ipc";
 import {
   agentBrowserProfile,
+  DEFAULT_DYNAMIC_ISLAND_PREFERENCE,
   IPC_ENDPOINTS,
   isManagedToolRuntime,
   isUpdateBusyPhase,
@@ -147,6 +148,7 @@ import {
   type AgentDefaultsPreferenceStore,
   createAgentDefaultsPreferenceStore,
 } from "./agent-defaults-preference-store";
+import { AgentDockFailed, AgentDockWindowController, toAgentDockFailed } from "./agent-dock-window";
 import { AgentImportService } from "./agent-import-service";
 import { AgentInitializationGate } from "./agent-initialization";
 import { AgentMarketplaceService } from "./agent-marketplace-service";
@@ -185,6 +187,10 @@ import {
   readMobileConnectApiUrl,
 } from "./central-auth-manager";
 import { ChatVisualPreviewer } from "./chat-visual-preview";
+import {
+  type ClaudeUserSetupPreferenceStore,
+  createClaudeUserSetupPreferenceStore,
+} from "./claude-user-setup-preference-store";
 import { createComputerIdle } from "./computer-idle";
 import { ComputerUseHighlightController } from "./computer-use-highlight-window";
 import { applicationBundlePath, applicationIconName } from "./computer-use-permission-app";
@@ -249,6 +255,7 @@ import {
   type LocalServerChildEnvironment,
   LocalServerMarketplace,
   LocalServerMembers,
+  reportLocalServerWorkingAgents,
   startLocalServerChild,
 } from "./local-server-child";
 import { LOCAL_SERVERS_FILE } from "./local-servers/local-server-registry";
@@ -263,9 +270,11 @@ import {
   computerUseDesktopPoint,
   computerUseDesktopRect,
   computerUseDisplays,
+  createAgentDockWindow,
   createComputerUseHighlightWindow,
   createComputerUsePermissionHelpWindow,
   createDynamicIslandWindow,
+  loadAgentDockRenderer,
   loadBrowserDockRenderer,
   loadComputerUseHighlightRenderer,
   loadComputerUsePermissionHelpRenderer,
@@ -283,6 +292,7 @@ import {
   startMcpOAuthRedirectServer,
 } from "./mcp-oauth-redirect-server";
 import { McpOAuthStore } from "./mcp-oauth-store";
+import { MCP_SERVER_OWNERS_FILE, McpServerOwnersStore } from "./mcp-server-owners-store";
 import { MemoryReviewPreferenceStore } from "./memory-review-preference-store";
 import { MessagingCredentialStore } from "./messaging-credential-store";
 import { ModelReleaseCatalog, ModelVisibility } from "./model-visibility";
@@ -342,6 +352,7 @@ import {
 import { SERVER_AUDIT_FILE, ServerAuditStore, serverAuditNames } from "./server-audit-store";
 import { AGENT_PROCESS_VARIABLE, agentProcessEnvironment, ServerMemory } from "./server-memory";
 import { ServerMode, type ServerModeEnvironment } from "./server-mode";
+import { ServerPersonalityPreferenceStore } from "./server-personality-preference-store";
 import { ServerTimezonePreferenceStore } from "./server-timezone-preference-store";
 import {
   configureApplicationProtocol,
@@ -420,7 +431,9 @@ const MEMORY_REVIEW_PREFERENCE_FILE = "openbot-memory-review-v1.json";
 const AGENT_NOTIFICATION_LEVELS_FILE = "openbot-agent-notification-levels-v1.json";
 const SIDEBAR_PINS_FILE = "openbot-sidebar-pins-v1.json";
 const SERVER_TIMEZONE_PREFERENCE_FILE = "openbot-server-timezone-v1.json";
+const SERVER_PERSONALITY_PREFERENCE_FILE = "openbot-server-personality-v1.json";
 const PROMPT_CACHE_TTL_PREFERENCE_FILE = "openbot-prompt-cache-ttl-v1.json";
+const CLAUDE_USER_SETUP_PREFERENCE_FILE = "openbot-claude-user-setup-v1.json";
 const MODEL_VISIBILITY_PREFERENCE_FILE = "openbot-model-visibility-v1.json";
 const REMOTE_SESSION_REUSE_PREFERENCE_FILE = "openbot-remote-session-reuse-preference-v1.json";
 const EXTERNAL_LINK_PREFERENCE_FILE = "openbot-external-link-preference-v1.json";
@@ -490,6 +503,7 @@ const TEARDOWN_ORDER = {
   computerUseHighlight: 18,
   computerUsePermissionHelp: 19,
   dynamicIsland: 20,
+  agentDock: 20.5,
   machineAlerts: 21,
   themePalettes: 22,
   // Before the browser, so no sign-in opens a tab while it stops.
@@ -669,7 +683,9 @@ export interface ApplicationServices {
   agentAccess: AgentAccessStore;
   serverAudit: ServerAuditStore;
   serverTimezone: ServerTimezonePreferenceStore;
+  serverPersonality: ServerPersonalityPreferenceStore;
   promptCacheTtl: PromptCacheTtlPreferenceStore;
+  claudeUserSetup: ClaudeUserSetupPreferenceStore;
   modelVisibility: ModelVisibility;
   remoteSessionReuse: RemoteSessionReusePreferenceStore;
   externalLinkPreference: ExternalLinkPreferenceStore;
@@ -712,6 +728,7 @@ export interface ApplicationServices {
   speech: VoiceSpeechService;
   voiceServer: VoiceServerService;
   dynamicIsland: DynamicIslandWindowController;
+  agentDock: AgentDockWindowController;
   cuaDriver: CuaDriverRuntime;
   computerUseHighlight: ComputerUseHighlightController;
   computerUsePermissionHelp: ComputerUsePermissionHelpWindowController;
@@ -1041,6 +1058,10 @@ export async function createApplicationServices({
   const dynamicIsland = new DynamicIslandWindowController({
     platform: process.platform,
     preferencePath: join(app.getPath("userData"), DYNAMIC_ISLAND_PREFERENCE_FILE),
+    // Only the dev server build starts with the island off, the same builds as the agent dock default.
+    ...(process.env.ELECTRON_RENDERER_URL
+      ? { defaultPreference: { ...DEFAULT_DYNAMIC_ISLAND_PREFERENCE, enabled: false } }
+      : {}),
     createWindow: createDynamicIslandWindow,
     loadWindow: (window, display) => loadDynamicIslandRenderer(window, display, appVariant),
     getDisplays: () => screen.getAllDisplays(),
@@ -1066,6 +1087,37 @@ export async function createApplicationServices({
       }),
   });
   teardown.push(TEARDOWN_ORDER.dynamicIsland, "the Dynamic Island", () => dynamicIsland.destroy());
+  const agentDock = new AgentDockWindowController({
+    platform: process.platform,
+    createWindow: createAgentDockWindow,
+    loadWindow: loadAgentDockRenderer,
+    screen,
+    getMainWindow: windows.getMainWindow,
+    ensureMainWindow: windows.ensureMainWindow,
+    presentMainWindow: showMainWindow,
+    // The same send as a reply from the Dynamic Island: main sends it to the local or the remote agent.
+    sendMessage: (action) =>
+      Effect.suspend(() => {
+        if (!criticalActionTargets) {
+          return Effect.fail(new AgentDockFailed({ cause: new Error(sourceText("error.app.notReady")) }));
+        }
+        const { agents, host, remoteServers } = criticalActionTargets;
+        return performDynamicIslandCriticalAction(
+          {
+            type: "send-message",
+            serverId: action.serverId,
+            agentId: action.agentId,
+            text: action.text,
+            clientMessageId: action.clientMessageId,
+          },
+          agents,
+          remoteServers,
+          { decodeVoid, decodeQueuedMessageReceipt },
+          () => host.conversationSender(),
+        ).pipe(toAgentDockFailed);
+      }),
+  });
+  teardown.push(TEARDOWN_ORDER.agentDock, "the agent dock", () => agentDock.destroy());
   const centralAuthApiUrl = readCentralAuthApiUrl(
     process.env.OPENBOT_AUTH_API_URL,
     app.isPackaged ? "https://api.openbot.run" : "http://127.0.0.1:3100",
@@ -1250,6 +1302,7 @@ export async function createApplicationServices({
     onProxyStatusChanged: () => browserProxyStatusChanged(),
     computerExit: (memberId) => browserEgress.exit(memberId),
     quitShortcut: (input) => windows.handleQuitShortcut(mainWindow, input),
+    pagePreload: join(__dirname, "../preload/browserPage.cjs"),
   });
   teardown.push(TEARDOWN_ORDER.browser, "the browser", () => runCauseEffect(browser.destroy()));
   if (!desktopTest)
@@ -1349,16 +1402,26 @@ export async function createApplicationServices({
         serverAuditNames(teamStore.configured ? teamStore.listMembers() : [], service.listAgents()),
       ),
   });
+  const mcpServerOwners = new McpServerOwnersStore(join(app.getPath("userData"), MCP_SERVER_OWNERS_FILE));
+  await runCauseEffect(mcpServerOwners.load());
   if (!(await runCauseEffect(agentAccess.load())))
     logger.warn("The roles file did not load. Members get no access to agents until an admin saves the roles.");
   const serverTimezone = new ServerTimezonePreferenceStore(
     join(app.getPath("userData"), SERVER_TIMEZONE_PREFERENCE_FILE),
   );
   await runCauseEffect(serverTimezone.load());
+  const serverPersonality = new ServerPersonalityPreferenceStore(
+    join(app.getPath("userData"), SERVER_PERSONALITY_PREFERENCE_FILE),
+  );
+  await runCauseEffect(serverPersonality.load());
   const promptCacheTtl = new PromptCacheTtlPreferenceStore(
     join(app.getPath("userData"), PROMPT_CACHE_TTL_PREFERENCE_FILE),
   );
   await runCauseEffect(promptCacheTtl.load());
+  const claudeUserSetup = createClaudeUserSetupPreferenceStore(
+    join(app.getPath("userData"), CLAUDE_USER_SETUP_PREFERENCE_FILE),
+  );
+  await runCauseEffect(claudeUserSetup.load());
   const remoteSessionReuse = createRemoteSessionReusePreferenceStore(
     join(app.getPath("userData"), REMOTE_SESSION_REUSE_PREFERENCE_FILE),
   );
@@ -1379,6 +1442,7 @@ export async function createApplicationServices({
     offersBackground: !hostedServer && !serverModeEnvironment && !localServerChild,
     menuBar: process.platform === "darwin",
     offersKeepAwake: process.platform !== "linux" && !hostedServer && !serverModeEnvironment && !localServerChild,
+    offersQuitGuard: process.platform === "darwin" && !hostedServer && !serverModeEnvironment && !localServerChild,
   });
   await runCauseEffect(appBehavior.load());
   if (!desktopTest)
@@ -1949,6 +2013,8 @@ export async function createApplicationServices({
       apiKey: (provider) => providerCredentials.get(provider),
       // Read at each Claude spawn, so a change from Server settings applies to the next process.
       promptCacheTtl: () => promptCacheTtl.get().ttl,
+      // Also read at each Claude spawn, from Settings > Providers > Claude of this computer.
+      claudeUserSetup: () => claudeUserSetup.get().enabled,
       // `configs()`, not `list()`: this is the one path the API keys travel, and it ends at the
       // spawned provider process. The IPC handlers are given `list()`.
       customProviders: () => customProviders.configs(),
@@ -2003,6 +2069,7 @@ export async function createApplicationServices({
     busyMessageMode: () => busyMessageMode.get().mode,
     agentMemoryLimit: () => agentMemoryLimit.get().limit,
     memoryReviewInterval: () => memoryReview.get().interval,
+    responseStyle: () => serverPersonality.responseStyle(),
     timezone: () => serverTimezone.effective(),
     // `workflowTriggers` is built later, after the workflows.
     extraRoutineSources: () => (workflowTriggers ? [workflowTriggers] : []),
@@ -2026,6 +2093,8 @@ export async function createApplicationServices({
     tables,
   });
   teardown.push(TEARDOWN_ORDER.service, "the agent service", () => runCauseEffect(service.stop()));
+  // The next turn of each agent uses the instructions of the new personality.
+  serverPersonality.onChange(() => service.responseStyleChanged());
   const agentMemoryLimitSetting = reloadingAgentMemoryLimit(agentMemoryLimit, service);
   promptCacheTtl.onChange(() => service.notifyProviderSettingsChanged());
   // The models that the model picker shows. Agents, tools and automations keep `service.listModels()`.
@@ -2737,11 +2806,15 @@ export async function createApplicationServices({
     browser,
     chat: teamChatStore,
     channels: service.channels,
-    // Present, so the host advertises `mcp-servers-v1`. The routes are admin-only.
+    // Present, so the host advertises `mcp-servers-v1`. The routes are admin-only without `mcpServerOwners`.
     mcpServers: service,
-    // Present, so the host advertises `mcp-sign-in-v1`. The routes are admin-only.
+    // Present, so the host advertises `mcp-member-access-v1`. A member then uses the MCP routes too,
+    // and changes only the servers that they added.
+    mcpServerOwners,
+    // Present, so the host advertises `mcp-sign-in-v1`. The routes are admin-only without `mcpServerOwners`.
     mcpSignIns: mcpHostSignIns,
-    // Present, so the host advertises `sign-in-relay-v1`. The routes are admin-only.
+    // Present, so the host advertises `sign-in-relay-v1`. The routes are admin-only, but for a member's
+    // MCP sign-in with `mcpServerOwners`.
     signInRelay: signInRelayHost,
     // Present, so the host advertises `connectors-v1`. GitHub answers `available: false` when this
     // build has no GitHub App. The routes are admin-only.
@@ -2769,6 +2842,15 @@ export async function createApplicationServices({
     storage: storageUsage,
     // Present, so the host advertises `machine-resources-v1`. The routes are admin-only.
     machine: machineAlerts,
+    // Present, so the host advertises `live-voice-v1`. A member's voice uses the Codex sign-in of this host.
+    liveVoice: {
+      startLiveVoice: (input, voice, owner) => service.startLiveVoice(input, voice, owner),
+      stopLiveVoice: (sessionId, memberId) => service.stopLiveVoice(sessionId, memberId),
+      subscribe: (listener) => {
+        service.on("liveVoice", listener);
+        return () => service.off("liveVoice", listener);
+      },
+    },
     // Present, so the host advertises `hosted-sites-v1`. Members list; only admins delete.
     hostedSites,
     // Present, so the host advertises `agent-import-v1`. Any member can import.
@@ -2785,6 +2867,8 @@ export async function createApplicationServices({
     },
     // Present, so the host advertises `agent-hidden-v1`. Any member can hide or restore an agent that they can see.
     hiddenAgents: service,
+    // Present, so the host advertises `routine-run-place-v1`. Any member reads the places; a change needs manage access.
+    routineRunPlaces: service.routineRecords,
     // Present, so the host advertises `agent-notification-levels-v1`. Each member sets their own levels.
     agentNotificationLevels,
     // Present, so the host advertises `sidebar-pins-v1`. Each member saves their own pins.
@@ -2830,6 +2914,7 @@ export async function createApplicationServices({
         changeSettings: (change) => scheduledUpdate().changeSettings(change),
       },
       timezone: serverTimezone,
+      personality: serverPersonality,
       memoryLimit: agentMemoryLimitSetting,
       memoryReview,
       promptCacheTtl,
@@ -3091,6 +3176,7 @@ export async function createApplicationServices({
     trace,
     statementTimings,
     tabProcessIds: () => browser.tabProcessIds(),
+    appWindowContents: () => BrowserWindow.getAllWindows().map((window) => window.webContents),
     turnRunning: () => service.earliestRunningTurnStartedAt() !== null,
   });
   teardown.push(TEARDOWN_ORDER.resourceMonitor, "the resource monitor", () =>
@@ -3424,6 +3510,11 @@ export async function createApplicationServices({
         warn: (message, cause) => logger.warn(message, toLogValue(cause)),
       }),
     );
+    reportLocalServerWorkingAgents({
+      read: () => service.workingAgents(),
+      subscribe: (listener) => service.on("event", listener),
+      write: (line) => process.stdout.write(line),
+    });
   }
   configureAttachmentProtocol({ mailbox, agents: service, remoteServers });
   configureServerLogoProtocols({ teamStore, remoteServers });
@@ -3459,6 +3550,12 @@ export async function createApplicationServices({
     cipher: secretCipher,
   });
   if (!desktopTest) await runCauseEffect(voiceApiKeys.load());
+  // The Groq key for Groq dictation. It is a file of its own, apart from the ElevenLabs key.
+  const groqVoiceKeys = new VoiceApiKeyStore({
+    path: join(app.getPath("userData"), "groq-api-key.json"),
+    cipher: secretCipher,
+  });
+  if (!desktopTest) await runCauseEffect(groqVoiceKeys.load());
   const voice = new VoiceTranscriptionService({
     resourcesRoot: app.isPackaged ? join(process.resourcesPath, "voice") : resolve(".openbot-build/voice"),
     // `voice:prepare` puts Parakeet in `.openbot-build/voice/model` for development. In development
@@ -3486,7 +3583,7 @@ export async function createApplicationServices({
           : resolve(".openbot-build/voice", COHERE_TRANSCRIBE_MODEL_DIRECTORY),
     },
     preferences: voicePreferences,
-    apiKeys: voiceApiKeys,
+    apiKeys: { elevenlabs: voiceApiKeys, groq: groqVoiceKeys },
     spawnHost: spawnVoiceTranscriptionHost,
     openStreamSocket: openScribeSocket,
   });
@@ -3501,6 +3598,12 @@ export async function createApplicationServices({
   voice.on("streamTranscript", forwardVoiceStreamTranscript);
   const speechPreferences = new SpeechPreferenceStore(join(app.getPath("userData"), "speech-preference.json"));
   await runCauseEffect(speechPreferences.load());
+  // The xAI key for replies read aloud. The ElevenLabs key is the key of ElevenLabs dictation.
+  const xaiSpeechKeys = new VoiceApiKeyStore({
+    path: join(app.getPath("userData"), "xai-api-key.json"),
+    cipher: secretCipher,
+  });
+  await runCauseEffect(xaiSpeechKeys.load());
   const speech = new VoiceSpeechService({
     resourcesRoot: app.isPackaged ? join(process.resourcesPath, "voice") : resolve(".openbot-build/voice"),
     modelDirectory:
@@ -3509,6 +3612,7 @@ export async function createApplicationServices({
         : resolve(".openbot-build/voice", SUPERTONIC_MODEL_DIRECTORY),
     preferences: speechPreferences,
     spawnHost: spawnVoiceSpeechHost,
+    apiKeys: { elevenlabs: voiceApiKeys, xai: xaiSpeechKeys },
   });
   teardown.push(TEARDOWN_ORDER.speech, "speech", () => Effect.runPromise(speech.shutdown()));
   speech.on("modelStatus", forwardSpeechModelStatus);
@@ -3527,7 +3631,8 @@ export async function createApplicationServices({
   const updateMetadataAvailable = app.isPackaged && existsSync(join(process.resourcesPath, "app-update.yml"));
   // A hosted or self-installed server runs a release that root owns. Root installs updates for it
   // when openbot-hosted-update has installed its request units. A container of openbot-instance asks
-  // the host instead, which pulls the image. Other containers have neither.
+  // the host instead, which pulls the image. Other containers have neither. The mode file names the
+  // whole computer, so a desktop AppImage beside a self-installed server keeps its own updater.
   const containerInstaller =
     app.isPackaged &&
     process.platform === "linux" &&
@@ -3537,7 +3642,7 @@ export async function createApplicationServices({
     containerInstaller ||
     (app.isPackaged &&
       process.platform === "linux" &&
-      (process.env.OPENBOT_HOSTED_SERVER === "1" || installationMode === "self") &&
+      (process.env.OPENBOT_HOSTED_SERVER === "1" || (serverModeEnvironment !== null && installationMode === "self")) &&
       existsSync(HOSTED_UPDATE_TRIGGER));
   // A local server is the same application as its parent, which installs the update for both.
   const updatesEnabled =
@@ -3873,7 +3978,9 @@ export async function createApplicationServices({
     agentAccess,
     serverAudit,
     serverTimezone,
+    serverPersonality,
     promptCacheTtl,
+    claudeUserSetup,
     modelVisibility,
     remoteSessionReuse,
     externalLinkPreference,
@@ -3917,6 +4024,7 @@ export async function createApplicationServices({
     speech,
     voiceServer,
     dynamicIsland,
+    agentDock,
     cuaDriver,
     computerUseHighlight,
     computerUsePermissionHelp,

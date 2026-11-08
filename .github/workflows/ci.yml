@@ -188,6 +188,9 @@ jobs:
       - name: Run the browser dialogs E2E
         run: xvfb-run -a bun run test:browser-dialogs
 
+      - name: Run the browser fingerprint E2E
+        run: xvfb-run -a bun run test:browser-fingerprint
+
       - name: Run the browser ambiguous targets E2E
         run: xvfb-run -a bun run test:browser-ambiguous-targets
 
@@ -338,6 +341,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: bun run test:sign-in-relay-replay
 
+      - name: Run the MCP member access E2E test
+        if: ${{ !cancelled() }}
+        run: bun run test:mcp-member-access
+
       - name: Run the server mute and unmute E2E test
         if: ${{ !cancelled() }}
         run: bun run test:server-mute
@@ -385,6 +392,10 @@ jobs:
       - name: Run the Discord role list and reply context E2E test
         if: ${{ !cancelled() }}
         run: bun run test:messaging-discord-access
+
+      - name: Run the Telegram answer mentions E2E test
+        if: ${{ !cancelled() }}
+        run: bun run test:messaging-telegram-mentions
 
       - name: Run the turn input E2E test
         if: ${{ !cancelled() }}
@@ -468,6 +479,10 @@ jobs:
           path: .openbot-build/local-servers-damaged-state-e2e/
           if-no-files-found: ignore
 
+      - name: Run the Codex idle thread release E2E test
+        if: ${{ !cancelled() }}
+        run: bun run test:codex-idle-thread-release
+
       - name: Run the Codex usage metering E2E test
         if: ${{ !cancelled() }}
         run: bun run test:codex-usage-metering
@@ -515,6 +530,14 @@ jobs:
       - name: Run the Claude usage after a resume E2E test
         if: ${{ !cancelled() }}
         run: bun run test:claude-usage-resume
+
+      - name: Run the Claude background hold at low memory E2E test
+        if: ${{ !cancelled() }}
+        run: bun run test:claude-background-hold
+
+      - name: Run the Claude turn context after a runtime refresh E2E test
+        if: ${{ !cancelled() }}
+        run: bun run test:claude-turn-context
 
       - name: Run the Claude late steer E2E test
         if: ${{ !cancelled() }}
@@ -604,6 +627,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: bun run test:workflow-agent-tools
 
+      - name: Run the workflow join E2E test
+        if: ${{ !cancelled() }}
+        run: bun run test:workflow-join
+
       - name: Run the Discord files to GitHub E2E test
         if: ${{ !cancelled() }}
         run: bun run test:discord-github-files
@@ -650,6 +677,7 @@ jobs:
             .openbot-build/team-session-revoke-e2e/
             .openbot-build/sign-in-relay-paste-e2e/
             .openbot-build/sign-in-relay-replay-e2e/
+            .openbot-build/mcp-member-access-e2e/
             .openbot-build/server-mute-e2e/
             .openbot-build/desktop-notifications-e2e/
             .openbot-build/push-notification-away-e2e/
@@ -662,6 +690,7 @@ jobs:
             .openbot-build/agent-hide-restore-e2e/
             .openbot-build/messaging-pause-resume-e2e/
             .openbot-build/messaging-discord-access-e2e/
+            .openbot-build/messaging-telegram-mentions-e2e/
             .openbot-build/turn-input-e2e/
             .openbot-build/zero-filled-settings-e2e/
             .openbot-build/provider-update-busy-e2e/
@@ -674,6 +703,7 @@ jobs:
             .openbot-build/codex-hung-app-server-e2e/
             .openbot-build/codex-missing-rollout-e2e/
             .openbot-build/codex-home-e2e/
+            .openbot-build/codex-idle-thread-release-e2e/
             .openbot-build/codex-usage-metering-e2e/
             .openbot-build/codex-usage-reset-e2e/
             .openbot-build/usage-read-pacing-e2e/
@@ -686,6 +716,8 @@ jobs:
             .openbot-build/agent-profile-accounts-e2e/
             .openbot-build/browser-profile-agents-e2e/
             .openbot-build/claude-usage-resume-e2e/
+            .openbot-build/claude-background-hold-e2e/
+            .openbot-build/claude-turn-context-e2e/
             .openbot-build/claude-late-steer-e2e/
             .openbot-build/provider-session-reuse-e2e/
             .openbot-build/backup-model-failover-e2e/
@@ -705,6 +737,7 @@ jobs:
             .openbot-build/workflow-telegram-e2e/
             .openbot-build/workflow-slack-e2e/
             .openbot-build/workflow-agent-tools-e2e/
+            .openbot-build/workflow-join-e2e/
             .openbot-build/discord-github-files-e2e/
             .openbot-build/opencode-usage-metering-e2e/
             .openbot-build/claude-api-key-e2e/
@@ -803,6 +836,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: bun run test:pi-steer
 
+      - name: Run the Pi idle release E2E test
+        if: ${{ !cancelled() }}
+        run: bun run test:pi-idle-release
+
       - name: Run the Muse instructions once E2E test
         if: ${{ !cancelled() }}
         run: bun run test:muse-instructions-once
@@ -881,6 +918,7 @@ jobs:
             .openbot-build/grok-steer-e2e/
             .openbot-build/grok-partial-model-list-e2e/
             .openbot-build/pi-steer-e2e/
+            .openbot-build/pi-idle-release-e2e/
             .openbot-build/muse-instructions-once-e2e/
             .openbot-build/provider-conformance-e2e/
             .openbot-build/opencode-expired-key-e2e/

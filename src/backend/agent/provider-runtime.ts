@@ -207,6 +207,7 @@ const SPAWN_ENVIRONMENT_PROVIDERS: readonly AgentProvider[] = [
   "kimi",
   "devin",
   "copilot",
+  "mistral",
   "hermes",
   "acp",
 ];
@@ -936,6 +937,16 @@ export class ProviderRuntime implements ProviderPort {
   readonly releaseIdleThreads = Effect.fn("ProviderRuntime.releaseIdleThreads")(function* (this: ProviderRuntime) {
     for (const client of this.#clients.values()) if (client.releaseIdleThreads) yield* client.releaseIdleThreads();
     for (const { client } of this.#confined.values()) if (client.releaseIdleThreads) yield* client.releaseIdleThreads();
+  }).bind(this);
+
+  /** Closes the threads that only quiet background work holds, in each client, when memory is low. */
+  readonly releaseQuietBackgroundThreads = Effect.fn("ProviderRuntime.releaseQuietBackgroundThreads")(function* (
+    this: ProviderRuntime,
+  ) {
+    for (const client of this.#clients.values())
+      if (client.releaseQuietBackgroundThreads) yield* client.releaseQuietBackgroundThreads();
+    for (const { client } of this.#confined.values())
+      if (client.releaseQuietBackgroundThreads) yield* client.releaseQuietBackgroundThreads();
   }).bind(this);
 
   listModels(): AgentModelOption[] {

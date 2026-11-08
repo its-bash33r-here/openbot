@@ -742,6 +742,7 @@ export class ProviderAccounts {
             methodId: "",
             timeoutMs: command.timeoutMs,
             logoutOnly: true,
+            signOutMethod: command.acpLogout === true ? undefined : command.acpLogout,
           });
           // A refused ACP sign-out has a safe message, which the account flow shows as the reason.
           return yield* logout.done.pipe(
