@@ -1116,6 +1116,18 @@ Network traffic can also occur when:
   tokens for those repositories. It does not store or log either token, and it gets no chats, files
   or commands. Agents reach the GitHub MCP server through a local server on `127.0.0.1`, which adds
   the right token to each call;
+- the user approves a bug report or a feature idea that an agent wrote. OpenBot shows the title and
+  the agent's text first (what happened and the steps, or what the user wants and why). It then sends the text to the central account
+  service (`api.openbot.run`) with the account session: that text, the agent's choice of the form's
+  area and severity, or of the request type, when it gives them, the OpenBot version, the operating
+  system and processor architecture, and the agent's provider and CLI version. OpenBot removes known
+  secrets from the text before it shows it. The service opens it as a public issue in the
+  `nightly-labs/openbot` repository on GitHub, as the OpenBot GitHub App, so the issue does not show
+  the account. The service does not store or log the text. For the limit of a few issues each minute and
+  10 each day, it counts the issues of each account; D1 keeps the account ID, the UTC day and the
+  count, and deletes the earlier days of an account when the account sends again, or when the account
+  is deleted. When the user is not signed in or the send fails, OpenBot gives a link to the GitHub
+  form with the same text instead, and nothing goes to the account service;
 - the user connects Link in Server settings › Vault. OpenBot asks `login.link.com` for a sign-in
   code and a token, with the label "OpenBot on" and this computer's name, which Link shows in its list
   of connected apps. OpenBot renews and revokes the token there, and reads the account email from
@@ -1674,8 +1686,10 @@ and session files in `~/.vibe`, or in `$VIBE_HOME`. OpenBot does not read, copy,
 uses `MISTRAL_API_KEY` when OpenBot's environment has it; OpenBot does not log or export this value.
 OpenBot starts Vibe with its telemetry off (`VIBE_ENABLE_TELEMETRY=false`), so it sends no usage
 events, traces or experiment requests, unless your Mistral organization's managed settings turn
-telemetry on. Mistral's terms apply. Team members see the host's Mistral agents when their app
-supports Mistral.
+telemetry on. OpenBot also turns on Vibe's model catalogue (`VIBE_EXPERIMENTAL_ENABLE_MODEL_CATALOG=true`):
+when a session opens, Vibe asks Mistral (`api.mistral.ai`) for the models of your account, with the
+same API key, and keeps the list in `model_catalog_cache.json` in `~/.vibe`, or in `$VIBE_HOME`.
+Mistral's terms apply. Team members see the host's Mistral agents when their app supports Mistral.
 
 ### Hermes
 

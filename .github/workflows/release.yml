@@ -94,6 +94,7 @@ jobs:
           if [[ "$GITHUB_REPOSITORY" == "nightly-labs/openbot" ]]; then
             bun scripts/discord-release-announcement.ts check "$package_version"
           fi
+          bun scripts/whats-new-translations.ts "$package_version"
           echo "version=$package_version" >> "$GITHUB_OUTPUT"
           echo "tag=v$package_version" >> "$GITHUB_OUTPUT"
 

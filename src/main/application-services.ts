@@ -36,6 +36,7 @@ import {
   createBrowserProfileService,
 } from "./browser-profile-service";
 import type { DesktopTestPaths } from "./desktop-test-mode";
+import { feedbackFacts, feedbackSender } from "./feedback";
 import { HostReleaseService, readInstallationMode } from "./host-release-service";
 import {
   CONTAINER_UPDATE_PATHS,
@@ -1955,6 +1956,8 @@ export async function createApplicationServices({
     mailbox,
     browser,
     visualPreview: new ChatVisualPreviewer(),
+    feedbackFacts: feedbackFacts(),
+    feedback: feedbackSender(centralAuth),
     marketplaceAppServer: (appId) => {
       const listed = catalogPluginServers.filter((server) => server.slug === appId);
       const [server] = listed;
@@ -2193,6 +2196,7 @@ export async function createApplicationServices({
       notify: forwardWorkflowNotice,
       connectionOn: (connectionId) => service.messaging.store.connection(connectionId)?.enabled === true,
       post: (connectionId, placeId, markdown) => service.messaging.deliver(connectionId, placeId, markdown),
+      channelPost: (input) => service.channels.postNote(input),
       discordSend: (connectionId, send) => service.messaging.discordSend(connectionId, send),
       telegramSend: (connectionId, send) => service.messaging.telegramSend(connectionId, send),
       slackSend: (connectionId, send) => service.messaging.slackSend(connectionId, send),
