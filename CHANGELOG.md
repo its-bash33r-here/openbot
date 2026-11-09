@@ -6,6 +6,135 @@ All notable changes to OpenBot will be documented here. The project follows
 
 ## [Unreleased]
 
+## [0.65.1] - 2026-11-09
+
+### Added
+
+- The "What's new" notes after an update show in your app language: Arabic, Chinese, Dutch,
+  French, German, Hebrew, Italian, Japanese, Korean, Polish, Portuguese, Russian, Spanish and
+  Turkish. Notes of releases before 0.56.0 stay in English.
+- A workflow output can post its result into an OpenBot channel. Choose "Channel" in "Send to": the channel list shows the OpenBot channels first, then the channels of each Slack, Discord, Telegram or WhatsApp connection. In an OpenBot channel, the result shows as a note of the workflow. It starts no task, and no agent answers it.
+- The agent menu of the Tasks composer has a search field. Type part of a name to filter the agents, and press Enter to take the first match.
+- On the Tasks page, drag the edge of the task panel to make it wider or narrower, for example to
+  split the window between the list and the chat. The app keeps the width. Double-click the edge to
+  go back to the default width.
+- On the Tasks page, the message box of an open task has a microphone. Speak a message to the task,
+  as in the chat.
+- Help → Report a problem opens the bug report form on GitHub with your OpenBot version and system
+  already filled in.
+- Agents can send a bug report or a feature idea for OpenBot for you. When something in OpenBot goes
+  wrong, or you say what you want, your agent offers a short card with the text in plain words. Select
+  Send to the OpenBot team: OpenBot opens the issue on GitHub, adds the app version and your system,
+  and a thank-you card in the chat links the issue. You do not need a GitHub account, and the issue
+  does not show your name. When you are not signed in, you get the filled-in form to submit yourself.
+
+### Changed
+
+- A new agent now opens with its own short welcome, in your language, as a question with three first
+  tasks that you can choose or answer in your own words. The welcome stays in the chat after you
+  answer. The setup message that OpenBot sends to the agent no longer shows in the chat.
+- The agent's working line, such as "Waiting for your answer", now shows under an open question or
+  approval card, not above it.
+- While a new agent prepares its welcome, the chat shows that it is working, not an empty "ready"
+  page. When you skip the welcome question, the agent replies with one short, friendly line.
+- In a channel, a greeting, a question about the channel or an unclear message goes to the lead, which
+  can ask what you mean. Before, the Coordinator could answer it itself and stop the task.
+- Channel members do the work they get themselves. They give work to another member only when you
+  ask for that member or for help, or when a part clearly needs another member's role.
+- A channel that you opened recently shows its messages at once when you open it again, without
+  Loading.
+- A stopped task in a channel shows its owner and the start of the request, so you can tell several
+  stopped tasks apart.
+- When channel members pass a task between them too many times, the card names them and says that
+  the task stopped to prevent a loop. Before, it said "The automatic assignment limit was reached",
+  in English only.
+- With the Natural response style, a channel member's progress note, such as "I'll check the shared
+  folder first", and its answer show as separate messages, as in an agent chat. Each message shows
+  once, when it is complete. Before, the text grew in the channel while the member wrote it.
+- Channel members no longer start a message with their own name, such as "Research: ..." or
+  "Launch check: ...". The chat already shows the name above each message.
+- In a channel, the activity line folds away when the work stops. Before, it went at once and the
+  messages above jumped.
+- A new message in a channel slides in, as in an agent chat. Before, channel messages appeared in
+  one frame. With the Natural response style, the message enters with all of its text. Its words do
+  not fade in one by one, so a complete answer does not look as if it still arrives.
+- When the lead gives parts of one request to several channel members, the desktop app shows one
+  row, such as "Assigned to Chief, Builder and Launch". Before, it showed one row for each member.
+- A channel member answers in the channel while it works in its own chat, as in a side thread.
+  Before, the channel waited until the chat turn ended, and the chat waited for channel work. An
+  agent still does one channel task at a time. Agents whose provider runs one turn at a time keep
+  the old order.
+- When one channel member stops while others work, its face shrinks out of the activity line and
+  the other faces close the gap. The line keeps its label until all work stops.
+- The theme ring has more light effects. Each color moves a different distance, so colors split at the wave. The page bends at the window edges when the wave gets to them. Borders and dividers light just before the wave crest. The theme sweep also splits colors. The ring uses the same frame time as before.
+- The Settings page is now called "Your settings", so it is clear that its settings are yours and not the settings of the server. A row at the end of its section list opens the settings of the server in the top row, and the server settings page has a row that opens your settings again. This is the same on the desktop app and in the web client.
+- The server settings page has a search field, on the desktop app and in the web client. It shows only the sections whose name or description contains the text. Enter opens the first section.
+- Connect Composio with a sign-in in the browser. You no longer type an MCP URL and an API key.
+  When an agent needs an app, such as Gmail or Slack, it asks you to connect that app. To use a
+  key, select "Use an API key instead" in the connect dialog. The key is the only field.
+
+### Fixed
+
+- Delete history of an agent chat works again. Before, it stopped with "Invalid SQLite column
+  rowid." when the chat had messages, and kept them.
+- A change of only the chat color or the exact color of an agent on a remote server no longer shows "Could not save agent settings". Before, the color was saved, but the app showed this error.
+- In the desktop app on macOS, times now follow the "24-hour time" setting in System Settings >
+  General > Date & Time. Before, chat times, routine times and usage limit notifications showed
+  "2:30 PM" in an English interface also when the Mac used a 24-hour clock.
+- Agents can now use a remote MCP server that you signed in to, such as n8n, when it uses the newest MCP version. Before, the agent showed "failed to connect" and had no tools from the server, but the server test passed.
+- Codex no longer shows "The agent could not continue" when you turn on an under-development feature, such as `async_compaction`, in the Codex `config.toml`. This Codex warning does not stop the agent. OpenBot now writes it to the log only.
+- When agent settings or an avatar cannot be saved, the error now shows only where you made the change: in the settings panel, or in the message box for a model or fast mode change. It gives the reason from the server. If you close the panel before the save ends, a notification shows the error. Before, the same error also showed as a message in the chat.
+- A menu in Settings that shows its current value again no longer makes the window stop responding. Before, a menu such as "Requests an hour" in Settings › Agents › Local scripts could save its own value again and again after you changed another setting, and you had to restart OpenBot.
+- The Download page on openbot.run opens again. Before, the Download button in the top bar showed "This page could not load", and a direct link to the page showed an empty page.
+- When a Muse or ChatGPT sign-in fails, the provider row now shows the reason from the provider, such
+  as a Meta account that has no payment method. Before, the row showed only "OpenBot could not
+  connect Muse. Try again."
+- In a narrow sidebar, the icon that shows that an agent waits for you is now a round badge. Before, it was a small, uneven pill.
+- The start animation now fills the window when the window changes size, for example when it goes to full screen. Before, it showed only a small part of the crew in a corner of the window.
+- The start animation now plays one time when the account or a server answers slowly. Before, the crew fell a second time when the workspace started to load.
+- On the New agent page, the mouse wheel now moves the row of suggested agents. Before, a mouse
+  wheel did not move the row, so you could not get to the suggestions on the right.
+- Kimi agents can now revise skills and run tools that need numbers or lists, such as data queries with parameters. Before, Kimi sent these values as text, and the tool refused the call.
+- Show the models of your Mistral account in the model picker. Before, Mistral offered only Mistral
+  Medium 3.5, unless you added models to `~/.vibe/config.toml` and restarted Mistral.
+- The ElevenLabs app can connect. Before, ElevenLabs showed "Authorization Error" in the browser,
+  and OpenBot showed "Waiting for the browser…" until the sign-in stopped.
+- When an agent waits for an answer to a question card and you write a new message in the same chat,
+  the agent now reads your message. The card closes as skipped, and the agent can ask again. Before,
+  the agent did not reply until you answered or skipped the card. Approval cards and browser sign-ins
+  still wait for your answer.
+- When a network proxy stops a Gemini (Antigravity) reply with an HTTP error, such as
+  "HTTP/1.0 502 Bad Gateway", the chat now says that the service did not complete the request and
+  that you can try again. A proxy's 429 error now shows the rate limit message. Before, the chat
+  showed only the raw error text.
+- A question that a new agent asks in its first turn now shows at once, not only after a reload.
+- Restart after an update now waits until the ring from the button has crossed the window, so the whole animation shows before OpenBot quits.
+- An update that downloads automatically now shows the same ring as a click on Download.
+- Agents on Cursor and on some other providers now keep their OpenBot tools after OpenBot restarts.
+  Before, a chat that OpenBot read again after the restart could lose them: the agent could not make
+  routines, save memories or message teammates, and no error showed.
+- A channel message that starts with a quote and then an @mention now goes to the mentioned member.
+  Before, the mention was ignored and the lead chose who answers.
+- A channel message that starts with several typed names, such as "@Ana @Ben", now goes to each of
+  them. Before, only the first name counted.
+- A channel member that you name in a message, such as "thanks @Ana", now answers. Before, routing
+  could decide that the message needed no answer.
+- Channel members no longer get the narration of a turn that already has an answer. This makes
+  channel turns use fewer tokens.
+- Work in another channel no longer makes the open channel read its messages again on each update.
+- The "New" line in a channel no longer moves to each answer that comes while you read the channel.
+  It stays where it was when you opened the channel, as in an agent chat.
+- A message that you send in a channel shows once. Before, it could show twice for a moment after
+  you pressed Enter.
+- A Codex agent now gets the tools of an MCP app or connector that has the same name as a server in your own Codex settings. Before, a tool list in those settings could hide all of the app's tools, while its test said that it was ready.
+- A sent message no longer shows an extra `@` before a pasted file or an MCP server tag. A file whose name has a `[`, such as `[Draft] plan.pdf`, now shows as one chip, not as broken text.
+- Channel list previews, awaiting replies, search results and the message queue show a pasted file by its name, not as `@image.png` or raw markup.
+- A message that one agent sends to another in a side thread no longer makes the thread unread. Before, each of these messages added 1 to the unread count of the thread.
+- When an agent sent a teammate several requests and they joined one running turn, only the request that the teammate answered got a result. The other requests now get the result of that turn too, so the agent that asked does not wait forever.
+- OpenBot no longer stops with "Render frame was disposed before WebFrameMain could be accessed" when a page loads while another browser tab has a crashed page.
+- A ChatGPT agent finds the skills in its own workspace. Before, it sometimes looked for a workspace skill in your personal skills folder, then said that the skill was not available.
+- An agent can show an email address again when it reads it from its memories or from earlier messages. Before, it saw `[redacted-email]` and could not give you the address. Secrets stay hidden, and logs still hide email addresses.
+
 ## [0.65.0] - 2026-11-08
 
 ### Added
